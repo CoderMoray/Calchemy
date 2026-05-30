@@ -1,16 +1,19 @@
-# PandasForLLM
+# Calchemy
 
-> 为 DataFrame 列运算设计的声明式 DSL，让业务方、LLM 和技术方说同一种语言。
+> A declarative DSL for DataFrame column calculations — bridging humans, LLMs, and data.
+> 数据炼金术：为 DataFrame 列运算设计的声明式 DSL，让业务方、LLM 和技术方说同一种语言。
 
 ---
 
 ## 项目定位
 
-传统 pandas 代码对业务方不可读，也让 LLM 在生成代码时承担不必要的翻译成本。`PandasForLLM` 提供一个轻量的**声明式计算 DSL（领域特定语言）**，用一行自然语言风格的表达式完成列计算：
+传统 pandas 代码对业务方不可读，也让 LLM 在生成代码时承担不必要的翻译成本。**Calchemy** 提供一个轻量的**声明式计算 DSL（领域特定语言）**，用一行自然语言风格的表达式完成列计算：
 
 ```
 gross_margin_rate = (revenue - cogs) / revenue >>> %
 ```
+
+**Calchemy = Calc + Alchemy**。把原始数据"炼"成业务指标——这就是数据炼金术。
 
 ### 三方受益
 
@@ -60,7 +63,7 @@ gross_margin_rate = (revenue - cogs) / revenue >>> %
 pip install pandas numpy
 ```
 
-直接复制 `core.py` 到项目即可使用，无额外依赖。
+直接复制 `calchemy.py` 到项目即可使用，无额外依赖。
 
 ---
 
@@ -68,20 +71,20 @@ pip install pandas numpy
 
 ```python
 import pandas as pd
-from core import pandas_divided_helper
+from calchemy import calc_add, calc_div
 
 df = pd.DataFrame({
     "revenue": [100, 200, 0, 400],
     "cost":    [60,  150, 0, 300],
 })
 
+# 减法
+calc_sub(df, "margin = revenue - cost")
+
 # 除法 + 百分比格式
-df = pandas_divided_helper(df, "margin_rate = revenue / cost >>> %")
-print(df["margin_rate"])
-# 0    166.67%
-# 1    133.33%
-# 2       None
-# 3    133.33%
+calc_div(df, "margin_rate = margin / revenue >>> %")
+
+print(df[["revenue", "cost", "margin", "margin_rate"]])
 ```
 
 ---
@@ -103,13 +106,11 @@ print(df["margin_rate"])
 ## 项目结构
 
 ```
-PandasForLLM/
-├── core.py               # 核心 DSL 实现（四则运算 helper + calc() 引擎）
+calchemy/
+├── calchemy.py           # 核心 DSL 实现（四则运算 helper + calc() 引擎）
+├── test_calchemy.py      # 测试套件
 ├── README.md             # 本文件
-└── .workbuddy/
-    └── memory/           # 项目知识库（架构设计、开发标准、进度记录）
-        ├── MEMORY.md     # 长期项目笔记与知识沉淀
-        └── YYYY-MM-DD.md # 每日开发日志（append-only）
+└── .gitignore
 ```
 
 ---
@@ -118,14 +119,12 @@ PandasForLLM/
 
 | 阶段 | 内容 | 状态 |
 |------|------|------|
-| Phase 1 | 除法 `pandas_divided_helper` | ✅ 完成 |
-| Phase 2 | 加减乘三个 helper 补全 | 🔲 待开发 |
+| Phase 1 | 除法 `calc_div` | ✅ 完成 |
+| Phase 2 | 加减乘 helper 补全 + errors 参数统一 | ✅ 完成 |
 | Phase 3 | 混合运算引擎 `calc()`，支持括号和链式计算 | 🔲 待开发 |
 | Phase 4 | LLM Function Calling schema + Skill 文档 | 🔲 待开发 |
 | Phase 5 | 跨后端适配（polars / SQL） | 🔲 规划中 |
 | Phase 6 | 指标注册表 + 血缘图谱 | 🔲 规划中 |
-
-详见 [`.workbuddy/memory/`](.workbuddy/memory/) 目录下的项目知识库
 
 ---
 
@@ -135,3 +134,10 @@ PandasForLLM/
 2. **列名即文档**：DSL 表达式本身就是业务逻辑的文档
 3. **防御性优先**：类型检查先于运算，精确报错优于强制转换
 4. **LLM 友好**：函数签名和 docstring 设计以 LLM 直接调用为目标
+5. **跨后端可迁移**：同一套 DSL 可在不同后端执行（Phase 5）
+
+---
+
+## License
+
+MIT
