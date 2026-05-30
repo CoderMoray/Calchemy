@@ -196,7 +196,7 @@ calchemy/
 | Phase 3 | 混合运算引擎 `calc()`（括号 + 常量） | ✅ 完成 |
 | Phase 3.5 | 拆解引擎 `_calc_decompose()`：逐步执行 + 血缘追踪 | ✅ 完成 |
 | Phase 4 | 链式调用 `Calchemy` 类 | ✅ 完成（111 测试通过） |
-| Phase 4.5 | 扩展运算符（指数 `**`、对数 `log`、绝对值 `abs` 等） | 🔲 待开发 |
+| Phase 4.5 | 扩展运算符（指数 `**`/`^`、对数 `log`、绝对值 `abs`、平方根 `sqrt`、n次方根 `root`） | ✅ 完成（124 测试通过） |
 | Phase 5 | LLM Function Calling schema + Skill 文档 | 🔲 规划中 |
 | Phase 6 | 跨后端适配（polars / SQL） | 🔲 规划中 |
 | Phase 7 | 指标注册表 + 血缘图谱 | 🔲 规划中 |
