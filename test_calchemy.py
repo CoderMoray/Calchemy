@@ -9,7 +9,7 @@ import pytest
 import pandas as pd
 import numpy as np
 
-from calchemy import calc_add, calc_sub, calc_mul, calc_div
+from calchemy import calc_add, calc_sub, calc_mul, calc_div, calc
 
 
 # ──────────────────────────────────────────────
@@ -399,3 +399,271 @@ class TestCrossFunctionEdgeCases:
         assert r1['sum'].iloc[0] == 15.0
         assert r2['sum'].iloc[0] == 15.0
         assert r3['sum'].iloc[0] == 15.0
+
+
+# ──────────────────────────────────────────────
+# 混合运算引擎 calc() 测试
+# ──────────────────────────────────────────────
+
+class TestCalc:
+    """calc() 混合运算引擎测试套件"""
+
+    # ── 简单运算（等价于 helper） ──
+
+    def test_simple_addition(self):
+        """简单加法：等价于 calc_add"""
+        df = pd.DataFrame({'a': [10.0, 20.0], 'b': [5.0, 4.0]})
+        result = calc(df, 'sum = a + b')
+        assert result['sum'].iloc[0] == 15.0
+        assert result['sum'].iloc[1] == 24.0
+
+    def test_simple_subtraction(self):
+        """简单减法：等价于 calc_sub"""
+        df = pd.DataFrame({'revenue': [100.0], 'cost': [40.0]})
+        result = calc(df, 'margin = revenue - cost')
+        assert result['margin'].iloc[0] == 60.0
+
+    def test_simple_multiplication(self):
+        """简单乘法：等价于 calc_mul"""
+        df = pd.DataFrame({'qty': [10.0], 'price': [3.5]})
+        result = calc(df, 'total = qty * price')
+        assert result['total'].iloc[0] == 35.0
+
+    def test_simple_division(self):
+        """简单除法：等价于 calc_div"""
+        df = pd.DataFrame({'a': [10.0], 'b': [5.0]})
+        result = calc(df, 'ratio = a / b')
+        assert result['ratio'].iloc[0] == 2.0
+
+    # ── 混合运算（括号 + 多操作数） ──
+
+    def test_parentheses_expression(self):
+        """括号改变优先级：毛利率 = (revenue - cogs) / revenue"""
+        df = pd.DataFrame({'revenue': [100.0, 200.0], 'cogs': [40.0, 80.0]})
+        result = calc(df, 'gm_rate = (revenue - cogs) / revenue')
+        assert result['gm_rate'].iloc[0] == 0.6
+        assert result['gm_rate'].iloc[1] == 0.6
+
+    def test_parentheses_with_format(self):
+        """括号 + 百分比格式"""
+        df = pd.DataFrame({'revenue': [100.0], 'cogs': [40.0]})
+        result = calc(df, 'gm_pct = (revenue - cogs) / revenue >>> %')
+        assert result['gm_pct'].iloc[0] == '60.00%'
+
+    def test_complex_expression(self):
+        """复杂表达式：(a - b) * c"""
+        df = pd.DataFrame({'a': [10.0, 20.0], 'b': [5.0, 4.0], 'c': [2.0, 3.0]})
+        result = calc(df, 'result = (a - b) * c')
+        assert result['result'].iloc[0] == 10.0
+        assert result['result'].iloc[1] == 48.0
+
+    def test_operator_precedence(self):
+        """运算优先级：a + b * c（先乘后加）"""
+        df = pd.DataFrame({'a': [1.0], 'b': [2.0], 'c': [3.0]})
+        result = calc(df, 'r = a + b * c')
+        assert result['r'].iloc[0] == 7.0  # 1 + 2*3 = 7
+
+    def test_nested_parentheses(self):
+        """嵌套括号：((a + b) - c) / d"""
+        df = pd.DataFrame({'a': [10.0], 'b': [5.0], 'c': [3.0], 'd': [2.0]})
+        result = calc(df, 'r = ((a + b) - c) / d')
+        assert result['r'].iloc[0] == 6.0  # (15 - 3) / 2 = 6.0
+
+    # ── 数字常量 ──
+
+    def test_numeric_constant(self):
+        """数字常量作为操作数：tax = revenue * 0.13"""
+        df = pd.DataFrame({'revenue': [100.0, 200.0]})
+        result = calc(df, 'tax = revenue * 0.13')
+        assert result['tax'].iloc[0] == 13.0
+        assert result['tax'].iloc[1] == 26.0
+
+    def test_integer_constant(self):
+        """整数常量"""
+        df = pd.DataFrame({'a': [10.0]})
+        result = calc(df, 'r = a * 2')
+        assert result['r'].iloc[0] == 20.0
+
+    def test_constant_expression(self):
+        """纯常量表达式"""
+        df = pd.DataFrame({'a': [1.0]})
+        result = calc(df, 'r = 1 + 2')
+        assert result['r'].iloc[0] == 3.0
+
+    # ── NaN 和零值处理 ──
+
+    def test_nan_input_coerce(self):
+        """NaN 输入 → 结果 NaN"""
+        df = pd.DataFrame({'a': [10.0, np.nan], 'b': [5.0, 3.0]})
+        result = calc(df, 'r = a + b')
+        assert result['r'].iloc[0] == 15.0
+        assert pd.isna(result['r'].iloc[1])
+
+    def test_division_zero_denominator(self):
+        """除法零值保护：分母为 0"""
+        df = pd.DataFrame({'a': [10.0, 0.0, 0.0], 'b': [0.0, 0.0, 5.0]})
+        result = calc(df, 'r = a / b')
+        assert result['r'].iloc[0] == 0.0   # 非零/0 → 脏数据强制 0
+        assert pd.isna(result['r'].iloc[1])  # 0/0 → NaN
+        assert result['r'].iloc[2] == 0.0    # 0/5 = 0
+
+    def test_nan_in_compound_expression(self):
+        """混合表达式中 NaN 传播"""
+        df = pd.DataFrame({'revenue': [100.0, np.nan], 'cogs': [40.0, 30.0]})
+        result = calc(df, 'gm_rate = (revenue - cogs) / revenue')
+        assert result['gm_rate'].iloc[0] == 0.6
+        assert pd.isna(result['gm_rate'].iloc[1])
+
+    # ── errors 参数 ──
+
+    def test_errors_raise_nan(self):
+        """errors='raise' → NaN 行抛异常"""
+        df = pd.DataFrame({'a': [1.0, np.nan], 'b': [2.0, 3.0]})
+        with pytest.raises(ValueError, match='NaN'):
+            calc(df, 'r = a + b', errors='raise')
+
+    def test_errors_raise_zero_denom(self):
+        """errors='raise' → 零分母行抛异常"""
+        df = pd.DataFrame({'a': [10.0], 'b': [0.0]})
+        with pytest.raises(ValueError, match='零分母'):
+            calc(df, 'r = a / b', errors='raise')
+
+    def test_errors_raise_no_problems(self):
+        """errors='raise' → 无问题时正常计算"""
+        df = pd.DataFrame({'a': [10.0], 'b': [2.0]})
+        result = calc(df, 'r = a / b', errors='raise')
+        assert result['r'].iloc[0] == 5.0
+
+    def test_errors_ignore(self):
+        """errors='ignore' → 问题行保留 NaN"""
+        df = pd.DataFrame({'a': [10.0, np.nan], 'b': [5.0, 3.0]})
+        result = calc(df, 'r = a + b', errors='ignore')
+        assert result['r'].iloc[0] == 15.0
+        assert pd.isna(result['r'].iloc[1])
+
+    def test_errors_invalid_value(self):
+        """非法 errors 参数"""
+        df = pd.DataFrame({'a': [1.0], 'b': [2.0]})
+        with pytest.raises(ValueError, match="coerce"):
+            calc(df, 'r = a + b', errors='bad')
+
+    # ── 格式和 rounding ──
+
+    def test_percentage_format(self):
+        """百分比格式后缀"""
+        df = pd.DataFrame({'a': [0.6]})
+        result = calc(df, 'r = a >>> %')
+        assert result['r'].iloc[0] == '60.00%'
+
+    def test_rounding(self):
+        """rounding 参数生效"""
+        df = pd.DataFrame({'a': [1.0], 'b': [3.0]})
+        result = calc(df, 'r = a / b', rounding=4)
+        assert result['r'].iloc[0] == 0.3333
+
+    # ── 安全性 ──
+
+    def test_reject_function_call(self):
+        """拒绝函数调用"""
+        df = pd.DataFrame({'a': [1.0]})
+        with pytest.raises(ValueError, match="不支持"):
+            calc(df, 'r = __import__("os").system("ls")')
+
+    def test_reject_attribute_access(self):
+        """拒绝属性访问"""
+        df = pd.DataFrame({'a': [1.0]})
+        with pytest.raises(ValueError, match="不支持"):
+            calc(df, 'r = a.__class__')
+
+    def test_reject_subscript(self):
+        """拒绝下标访问"""
+        df = pd.DataFrame({'a': [1.0]})
+        with pytest.raises(ValueError, match="不支持"):
+            calc(df, 'r = a[0]')
+
+    def test_reject_comparison(self):
+        """拒绝比较运算符"""
+        df = pd.DataFrame({'a': [1.0], 'b': [2.0]})
+        with pytest.raises(ValueError, match="不支持"):
+            calc(df, 'r = a > b')
+
+    # ── 格式错误 ──
+
+    def test_no_equals_sign(self):
+        """无 = 号"""
+        df = pd.DataFrame({'a': [1.0]})
+        with pytest.raises(ValueError, match="'='"):
+            calc(df, 'a + b')
+
+    def test_empty_column_name(self):
+        """空列名"""
+        df = pd.DataFrame({'a': [1.0]})
+        with pytest.raises(ValueError, match="新列名为空"):
+            calc(df, ' = a + b')
+
+    def test_empty_expression(self):
+        """空计算表达式"""
+        df = pd.DataFrame({'a': [1.0]})
+        with pytest.raises(ValueError, match="计算表达式为空"):
+            calc(df, 'r = ')
+
+    def test_syntax_error_in_expression(self):
+        """表达式语法错误"""
+        df = pd.DataFrame({'a': [1.0]})
+        with pytest.raises(ValueError, match="语法错误"):
+            calc(df, 'r = a +')
+
+    # ── 列不存在 ──
+
+    def test_column_not_found(self):
+        """列不存在 → KeyError"""
+        df = pd.DataFrame({'a': [1.0]})
+        with pytest.raises(KeyError, match='nonexistent'):
+            calc(df, 'r = a + nonexistent')
+
+    # ── MultiIndex ──
+
+    def test_multiindex(self, df_multiindex):
+        """MultiIndex DataFrame 正常计算"""
+        result = calc(df_multiindex.copy(), 'sum = a + b')
+        assert result['sum'].iloc[0] == 15.0
+        assert result['sum'].iloc[3] == 42.0
+
+    # ── 多步计算链 ──
+
+    def test_chained_calculations(self):
+        """多步计算链：先算 margin，再用 margin 算 margin_rate"""
+        df = pd.DataFrame({'revenue': [100.0, 200.0], 'cost': [40.0, 80.0]})
+        calc(df, 'margin = revenue - cost')
+        calc(df, 'margin_rate = margin / revenue >>> %')
+        assert df['margin'].iloc[0] == 60.0
+        assert df['margin_rate'].iloc[0] == '60.00%'
+
+    # ── 一元运算符 ──
+
+    def test_unary_negative(self):
+        """一元负号：-a"""
+        df = pd.DataFrame({'a': [5.0, 10.0]})
+        result = calc(df, 'neg = -a')
+        assert result['neg'].iloc[0] == -5.0
+        assert result['neg'].iloc[1] == -10.0
+
+    def test_unary_positive(self):
+        """一元正号：+a（恒等）"""
+        df = pd.DataFrame({'a': [5.0]})
+        result = calc(df, 'pos = +a')
+        assert result['pos'].iloc[0] == 5.0
+
+    def test_negative_constant(self):
+        """负号常量：a * -1"""
+        df = pd.DataFrame({'a': [5.0]})
+        result = calc(df, 'r = a * -1')
+        assert result['r'].iloc[0] == -5.0
+
+    # ── 返回值 ──
+
+    def test_returns_same_dataframe(self):
+        """返回同一个 DataFrame 实例"""
+        df = pd.DataFrame({'a': [1.0], 'b': [2.0]})
+        result = calc(df, 'r = a + b')
+        assert result is df

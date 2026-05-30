@@ -4,6 +4,9 @@ Calchemy — A declarative DSL for DataFrame column calculations.
 Every DataFrame has gold in it. Calchemy helps you extract it.
 """
 
+import ast
+from typing import Union
+
 import pandas as pd
 import numpy as np
 
@@ -515,5 +518,343 @@ def calc_mul(
 
     # 6. 格式化输出
     _apply_format(df, 新列名, format, rounding, is_multi_index)
+
+    return df
+
+
+# ──────────────────────────────────────────────
+# 内部 AST 求值器（calc() 使用）
+# ──────────────────────────────────────────────
+
+# 允许的二元运算符映射
+_BINOP_MAP: dict[type, str] = {
+    ast.Add: '+',
+    ast.Sub: '-',
+    ast.Mult: '*',
+    ast.Div: '/',
+}
+
+# 允许的一元运算符映射
+_UNARYOP_MAP: dict[type, str] = {
+    ast.UAdd: '+',
+    ast.USub: '-',
+}
+
+
+def _eval_ast_node(
+    node: ast.AST,
+    df: pd.DataFrame,
+    errors: str,
+    collected_cols: list[str],
+) -> Union[pd.Series, float, int]:
+    """递归求值 AST 节点，返回 Series 或标量。
+
+    Parameters
+    ----------
+    node : ast.AST
+        要求值的 AST 节点。
+    df : pd.DataFrame
+        数据源。
+    errors : str
+        异常处理模式。
+    collected_cols : list[str]
+        收集到的所有列名（用于 raise 模式下的错误消息）。
+
+    Returns
+    -------
+    pd.Series | float | int
+        求值结果。
+
+    Raises
+    ------
+    ValueError
+        遇到不允许的 AST 节点类型。
+    """
+    # 常量：数字字面量
+    if isinstance(node, ast.Constant):
+        if isinstance(node.value, (int, float)):
+            return node.value
+        raise ValueError(
+            f"不支持的字面量类型：{type(node.value).__name__}（值：{node.value!r}），"
+            f"仅支持整数和浮点数。"
+        )
+
+    # 名称：列名引用
+    if isinstance(node, ast.Name):
+        col_name = node.id
+        collected_cols.append(col_name)
+        if col_name not in df.columns:
+            raise KeyError(
+                f"列 '{col_name}' 不存在于 DataFrame 中，可用列：{list(df.columns)}"
+            )
+        return df[col_name]
+
+    # 二元运算
+    if isinstance(node, ast.BinOp):
+        op_type = type(node.op)
+        if op_type not in _BINOP_MAP:
+            raise ValueError(
+                f"不支持的运算符：{type(node.op).__name__}，"
+                f"仅支持 +、-、*、/ 四则运算。"
+            )
+
+        left = _eval_ast_node(node.left, df, errors, collected_cols)
+        right = _eval_ast_node(node.right, df, errors, collected_cols)
+
+        op_symbol = _BINOP_MAP[op_type]
+
+        # 非 '/' 运算：raise 模式检查 NaN 输入
+        if errors == 'raise' and op_symbol != '/':
+            mask_nan = pd.Series(False, index=df.index)
+            if isinstance(left, pd.Series):
+                mask_nan = mask_nan | left.isna()
+            if isinstance(right, pd.Series):
+                mask_nan = mask_nan | right.isna()
+            if mask_nan.any():
+                problem_rows = df.index[mask_nan]
+                cols_str = '、'.join(f"'{c}'" for c in collected_cols)
+                raise ValueError(
+                    f"表达式中的列 {cols_str} 在以下行存在 NaN 数据"
+                    f"（索引）：{problem_rows.tolist()[:10]}..."
+                )
+
+        if op_symbol == '+':
+            result = left + right
+        elif op_symbol == '-':
+            result = left - right
+        elif op_symbol == '*':
+            result = left * right
+        elif op_symbol == '/':
+            # 除法需要零值保护，与 calc_div 语义一致
+            left_is_series = isinstance(left, pd.Series)
+            right_is_series = isinstance(right, pd.Series)
+
+            if right_is_series:
+                mask_zero_denom = (right == 0)
+                if left_is_series:
+                    mask_nan_input = left.isna() | right.isna()
+                else:
+                    mask_nan_input = right.isna() if left != left else pd.Series(True, index=df.index)
+
+                # raise 模式
+                if errors == 'raise':
+                    problem_mask = mask_zero_denom | mask_nan_input
+                    if problem_mask.any():
+                        problem_rows = df.index[problem_mask]
+                        cols_str = '、'.join(f"'{c}'" for c in collected_cols)
+                        raise ValueError(
+                            f"表达式中的列 {cols_str} 在以下行存在 NaN 或零分母数据"
+                            f"（索引）：{problem_rows.tolist()[:10]}..."
+                        )
+
+                # 核心除法（向量化）
+                result = np.nan * np.ones(len(df)) if left_is_series else np.nan
+                if left_is_series:
+                    result = left.copy().astype(float)
+                    result[:] = np.nan
+
+                mask_valid = ~mask_zero_denom
+                if errors == 'ignore':
+                    mask_valid = mask_valid & (~mask_nan_input)
+
+                if left_is_series:
+                    result = pd.Series(np.nan, index=df.index, dtype=float)
+                    result[mask_valid] = left[mask_valid] / right[mask_valid]
+                else:
+                    # left 是标量
+                    result = pd.Series(np.nan, index=df.index, dtype=float)
+                    result[mask_valid] = left / right[mask_valid]
+
+                # 脏数据：分子≠0 且分母=0 → 强制 0
+                if left_is_series:
+                    mask_dirty = (left != 0) & mask_zero_denom & (~mask_nan_input)
+                else:
+                    mask_dirty = mask_zero_denom & (~mask_nan_input) if left != 0 else pd.Series(False, index=df.index)
+
+                if errors != 'ignore':
+                    result[mask_dirty] = 0
+
+            else:
+                # right 是标量
+                if right == 0:
+                    if left_is_series:
+                        mask_nan_input = left.isna()
+                        if errors == 'raise' and mask_nan_input.any():
+                            problem_rows = df.index[mask_nan_input]
+                            raise ValueError(
+                                f"表达式中的列在以下行存在 NaN 数据"
+                                f"（索引）：{problem_rows.tolist()[:10]}..."
+                            )
+                        result = pd.Series(np.nan, index=df.index, dtype=float)
+                        if left_is_series:
+                            if errors == 'ignore':
+                                mask_ok = ~mask_nan_input
+                                result[mask_ok] = 0
+                            else:
+                                result[:] = 0
+                            result[mask_nan_input] = np.nan
+                    else:
+                        result = np.nan if left == 0 else 0
+                else:
+                    result = left / right
+
+            return result
+
+        return result
+
+    # 一元运算（正号 / 负号）
+    if isinstance(node, ast.UnaryOp):
+        op_type = type(node.op)
+        if op_type not in _UNARYOP_MAP:
+            raise ValueError(
+                f"不支持的一元运算符：{type(node.op).__name__}，"
+                f"仅支持正号(+)和负号(-)。"
+            )
+
+        operand = _eval_ast_node(node.operand, df, errors, collected_cols)
+        op_symbol = _UNARYOP_MAP[op_type]
+
+        if op_symbol == '+':
+            return operand
+        elif op_symbol == '-':
+            return -operand
+
+    # 不允许的节点类型
+    raise ValueError(
+        f"不支持的表达式元素：{type(node).__name__}。"
+        f"仅支持列名、数字常量和 +、-、*、/ 四则运算。"
+    )
+
+
+# ──────────────────────────────────────────────
+# 混合运算引擎
+# ──────────────────────────────────────────────
+
+def calc(
+    df: pd.DataFrame,
+    expr: str,
+    rounding: int = 2,
+    format: str | None = None,
+    errors: str = 'coerce',
+) -> pd.DataFrame:
+    """
+    在 DataFrame 中新增一列，其值为混合四则运算表达式的结果，支持括号和多个操作数。
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        待处理的 DataFrame。
+    expr : str
+        计算表达式，支持三种写法：
+        1) 简单运算：
+           "new_col = col_a + col_b"
+        2) 混合运算（含括号）：
+           "gm_rate = (revenue - cogs) / revenue"
+        3) 带格式后缀：
+           "gm_rate = (revenue - cogs) / revenue >>> %"
+        空格可随意添加。运算符支持 +、-、*、/，支持括号改变优先级。
+        操作数可以是列名或数字常量。
+    rounding : int, default 2
+        保留的小数位数（百分比模式下同样适用）。
+    format : str, optional
+        显式指定返回格式，可选值：
+        None / 'float'          → 普通浮点，先 round 再返回
+        'percent'/'pct'/'%'/'percentage'/... → 转换为百分比字符串并保留指定小数位
+        若 expr 中已用 >>> 指定格式，则以 expr 为准。
+    errors : {'coerce', 'raise', 'ignore'}, default 'coerce'
+        异常数据处理方式：
+        - 'coerce'：问题数据 → NaN 或 0（见 Notes）；NaN 输入 → NaN
+        - 'raise'：遇到零分母或 NaN 输入行立即抛出 ValueError，消息包含行索引
+        - 'ignore'：跳过问题行，保留该行新列的原始值（NaN）
+
+    Returns
+    -------
+    pd.DataFrame
+        在原表基础上新增一列后的同一个 DataFrame 实例。
+
+    Notes
+    -----
+    - 除法语义与 calc_div 一致：
+      分母=0 且分子=0 → NaN；分母=0 且分子≠0 → 强制 0。
+    - 加减乘的 NaN 处理：任一操作数为 NaN → 结果 NaN。
+    - 安全性：使用 ast.parse 的受限子集解析表达式，**禁止 eval()**，
+      不允许函数调用、属性访问、下标等操作。
+
+    Examples
+    --------
+    >>> df = pd.DataFrame({"revenue": [100, 200], "cogs": [40, 80]})
+    >>> calc(df, "gm = revenue - cogs")
+    >>> df["gm"]
+    0    60.0
+    1    120.0
+    Name: gm, dtype: float64
+
+    >>> calc(df, "gm_rate = (revenue - cogs) / revenue >>> %")
+    >>> df["gm_rate"]
+    0    60.00%
+    1    60.00%
+    Name: gm_rate, dtype: object
+
+    >>> calc(df, "tax = revenue * 0.13")
+    >>> df["tax"]
+    0    13.0
+    1    26.0
+    Name: tax, dtype: float64
+    """
+    # 1. 解析格式后缀 & 校验 errors
+    expr, format = _parse_format_suffix(expr, format)
+    _validate_errors(errors)
+
+    # 2. 分离新列名和计算表达式
+    if expr.count('=') != 1:
+        raise ValueError(
+            f"格式错误，期望 'new = expression'，收到：'{expr}'，原因：'=' 数量不为 1。"
+        )
+
+    new_col = expr.split('=')[0].strip()
+    calc_expr = expr.split('=')[1].strip()
+
+    if not new_col:
+        raise ValueError(
+            f"格式错误，新列名为空，期望 'new = expression'，收到：'{expr}'。"
+        )
+    if not calc_expr:
+        raise ValueError(
+            f"格式错误，计算表达式为空，期望 'new = expression'，收到：'{expr}'。"
+        )
+
+    # 3. 用 ast.parse 解析表达式（受限子集）
+    try:
+        tree = ast.parse(calc_expr, mode='eval')
+    except SyntaxError as e:
+        raise ValueError(
+            f"表达式语法错误：'{calc_expr}'，原因：{e.msg}。"
+            f"仅支持列名、数字常量和 +、-、*、/ 四则运算。"
+        )
+
+    # ast.parse('expr', mode='eval') 返回 Expression，其 body 才是实际节点
+    root = tree.body
+
+    # 4. 递归求值 AST
+    collected_cols: list[str] = []
+    result = _eval_ast_node(root, df, errors, collected_cols)
+
+    # 5. 写入 DataFrame
+    is_multi_index = isinstance(df.index, pd.MultiIndex)
+
+    if isinstance(result, pd.Series):
+        if is_multi_index:
+            df[new_col] = result
+        else:
+            df.loc[:, new_col] = result
+    else:
+        # 标量结果（如 calc(df, "x = 1 + 2")）
+        if is_multi_index:
+            df[new_col] = result
+        else:
+            df.loc[:, new_col] = result
+
+    # 6. 格式化输出
+    _apply_format(df, new_col, format, rounding, is_multi_index)
 
     return df

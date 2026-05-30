@@ -1,0 +1,209 @@
+<p align="center">
+  <a href="README.md">
+    <img src="https://img.shields.io/badge/语言-中文-blue?style=for-the-badge" alt="中文">
+  </a>
+  <a href="README_EN.md">
+    <img src="https://img.shields.io/badge/Language-English-slategray?style=for-the-badge" alt="English">
+  </a>
+</p>
+
+<h1 align="center">⚗️ Calchemy</h1>
+
+<p align="center">
+  <strong>Data Alchemy</strong> — A declarative DSL for DataFrame column calculations<br>
+  Bridging humans, LLMs, and data with one language
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/python-3.10+-blue" alt="Python 3.10+">
+  <img src="https://img.shields.io/badge/tests-56%20passing-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
+</p>
+
+---
+
+## ✨ One Expression, One Calculation
+
+Traditional pandas code is unreadable to business users and error-prone for LLMs. **Calchemy** uses a single natural-language-style expression to perform column calculations:
+
+```python
+# Traditional pandas — hard for business users, easy for LLMs to get wrong
+df["gm_rate"] = (df["revenue"] - df["cogs"]) / df["revenue"]
+df["gm_rate"] = df["gm_rate"].apply(lambda x: f"{x:.2%}" if pd.notna(x) else x)
+
+# Calchemy — readable by humans, directly outputtable by LLMs
+calc(df, "gm_rate = (revenue - cogs) / revenue >>> %")
+```
+
+**Calchemy = Calc + Alchemy**. Turn raw data into business metrics — that's data alchemy.
+
+> *"Every DataFrame has gold in it. Calchemy helps you extract it."*
+
+### Benefits for Everyone
+
+| Role | Benefit |
+|------|---------|
+| 🧑‍💼 **Business Users** | Read calculation logic directly — no pandas knowledge needed |
+| 🧑‍💻 **Developers** | Replace repetitive pandas boilerplate — defensive handling built in |
+| 🤖 **LLMs / AI** | Output DSL expressions instead of pandas code — fewer syntax errors and debug loops |
+
+---
+
+## 🚀 Quick Start
+
+### Install
+
+```bash
+pip install calchemy
+```
+
+Or copy `calchemy.py` into your project. Only `pandas` and `numpy` are required.
+
+### 30-Second Example
+
+```python
+import pandas as pd
+from calchemy import calc
+
+df = pd.DataFrame({
+    "revenue": [100, 200, 0, 400],
+    "cogs":    [60,  150, 0, 300],
+})
+
+# Compound expression + percentage format
+calc(df, "margin = revenue - cogs")
+calc(df, "margin_rate = margin / revenue >>> %")
+
+print(df[["revenue", "cogs", "margin", "margin_rate"]])
+```
+
+Output:
+
+```
+   revenue  cogs  margin margin_rate
+0      100    60      40       40.00%
+1      200   150      50       25.00%
+2        0     0       0         nan
+3      400   300     100       25.00%
+```
+
+---
+
+## 📖 DSL Syntax
+
+### Basic Format
+
+```
+new_col = col_A <operator> col_B
+new_col = col_A <operator> col_B >>> format
+```
+
+### Compound Expressions (with parentheses)
+
+```
+gm_rate = (revenue - cogs) / revenue >>> %
+tax = revenue * 0.13
+```
+
+**Operands**: column names (unquoted) or numeric constants
+**Operators**: `+` `-` `*` `/`
+**Format suffix** (after `>>>`): `%`/`pct`/`percent` → percentage; omitted → float
+
+### API Reference
+
+| Function | Purpose | Example |
+|----------|---------|---------|
+| `calc()` | 🌟 **Compound expression engine** (recommended) | `calc(df, "rate = (a - b) / c >>> %")` |
+| `calc_add()` | Addition | `calc_add(df, "total = a + b")` |
+| `calc_sub()` | Subtraction | `calc_sub(df, "margin = a - b")` |
+| `calc_mul()` | Multiplication | `calc_mul(df, "gmv = qty * price")` |
+| `calc_div()` | Division (with zero-protection) | `calc_div(df, "rate = a / b >>> %")` |
+
+> 💡 Use `calc_*` helpers for simple two-operand operations; use `calc()` for compound expressions.
+
+---
+
+## 🛡️ Error Handling (`errors` Parameter)
+
+All functions support the `errors` parameter, named after `pd.to_datetime(errors=...)`:
+
+| `errors` Value | Behavior | Use Case |
+|----------------|----------|----------|
+| `'coerce'` (default) | NaN & zero-denom → `NaN`; dirty data → `0` | 🏭 Production reports, fault-tolerant |
+| `'raise'` | Raise `ValueError` on zero-denom or NaN | 🔍 Data validation, strict mode |
+| `'ignore'` | Skip problem rows, preserve original values | 🔄 Idempotent re-runs |
+
+```python
+# Strict mode: fail fast on problems
+calc(df, "rate = a / b", errors='raise')
+
+# Ignore mode: skip problems
+calc(df, "rate = a / b", errors='ignore')
+```
+
+### NaN Handling Semantics
+
+| Case | Result |
+|------|--------|
+| Either operand is NaN | `NaN` |
+| Division: 0 / 0 | `NaN` (undefined) |
+| Division: non-zero / 0 | `0` (dirty data forced to zero, avoiding ∞) |
+| 0 × NaN | `NaN` (no implicit fill) |
+
+---
+
+## 🔒 Security
+
+`calc()` uses a restricted subset of `ast.parse` to evaluate expressions:
+
+- ✅ Allowed: column names (`Name`), numeric constants (`Constant`), arithmetic (`BinOp`), unary +/- (`UnaryOp`)
+- ❌ Rejected: function calls, attribute access, subscripting, comparisons, `eval()`
+
+```python
+# ❌ These expressions will be rejected
+calc(df, 'r = __import__("os").system("ls")')  # Function call
+calc(df, 'r = a.__class__')                     # Attribute access
+calc(df, 'r = a > b')                           # Comparison
+```
+
+---
+
+## 📁 Project Structure
+
+```
+calchemy/
+├── calchemy.py           # Core DSL implementation
+├── test_calchemy.py      # Test suite (56+ cases)
+├── README.md             # Chinese documentation
+├── README_EN.md          # English documentation (this file)
+└── .gitignore
+```
+
+---
+
+## 🗺️ Roadmap
+
+| Phase | Content | Status |
+|-------|---------|--------|
+| Phase 1 | Division `calc_div` | ✅ Done |
+| Phase 2 | Add/sub/mul helpers + unified `errors` param | ✅ Done |
+| Phase 3 | Compound expression engine `calc()` (parentheses + constants) | ✅ Done |
+| Phase 4 | LLM Function Calling schema + Skill docs | 🔲 Upcoming |
+| Phase 5 | Multi-backend support (polars / SQL) | 🔲 Planned |
+| Phase 6 | Metric registry + lineage graph | 🔲 Planned |
+
+---
+
+## 🎯 Design Principles
+
+1. **No Implicit Magic**: NaN handling must be explicitly declared via the `errors` parameter
+2. **Column Names as Documentation**: DSL expressions ARE the readable documentation for business logic
+3. **Defensive First**: Type checking before operations; precise errors over silent coercion
+4. **LLM-Friendly**: Function signatures and docstrings designed for direct LLM invocation
+5. **Backend-Portable**: Same DSL runs on different backends (Phase 5)
+
+---
+
+## License
+
+MIT
