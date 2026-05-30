@@ -28,10 +28,6 @@ Traditional pandas code is unreadable to business users and error-prone for LLMs
 
 ### Side-by-Side Comparison
 
-<table>
-<tr>
-<td width="50%">
-
 **❌ Traditional pandas — unreadable to business users**
 
 ```python
@@ -43,9 +39,6 @@ df["gm_rate"] = df["gm_rate"].apply(
 )
 ```
 
-</td>
-<td width="50%">
-
 **✅ Calchemy — readable by anyone**
 
 ```python
@@ -53,10 +46,6 @@ calc(df, "gm_rate = (revenue - cogs) / revenue >>> %")
 ```
 
 > Business users don't need to understand `df["..."]` or `apply(lambda x: ...)`. **Calchemy expressions are business language** — `gm_rate = (revenue - cogs) / revenue` is instantly readable and verifiable.
-
-</td>
-</tr>
-</table>
 
 ### Common Business Scenarios
 
