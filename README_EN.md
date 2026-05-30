@@ -16,7 +16,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/python-3.10+-blue" alt="Python 3.10+">
-  <img src="https://img.shields.io/badge/tests-101%20passing-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-124%20passing-brightgreen" alt="Tests">
   <img src="https://img.shields.io/badge/license-Apache%202.0-green" alt="License">
 </p>
 
@@ -26,14 +26,54 @@
 
 Traditional pandas code is unreadable to business users and error-prone for LLMs. **Calchemy** uses a single natural-language-style expression to perform column calculations:
 
-```python
-# Traditional pandas — hard for business users, easy for LLMs to get wrong
-df["gm_rate"] = (df["revenue"] - df["cogs"]) / df["revenue"]
-df["gm_rate"] = df["gm_rate"].apply(lambda x: f"{x:.2%}" if pd.notna(x) else x)
+### Side-by-Side Comparison
 
-# Calchemy — readable by humans, directly outputtable by LLMs
+<table>
+<tr>
+<td width="50%">
+
+**❌ Traditional pandas — unreadable to business users**
+
+```python
+df["gm_rate"] = (
+    df["revenue"] - df["cogs"]
+) / df["revenue"]
+df["gm_rate"] = df["gm_rate"].apply(
+    lambda x: f"{x:.2%}" if pd.notna(x) else x
+)
+```
+
+</td>
+<td width="50%">
+
+**✅ Calchemy — readable by anyone**
+
+```python
 calc(df, "gm_rate = (revenue - cogs) / revenue >>> %")
 ```
+
+> Business users don't need to understand `df["..."]` or `apply(lambda x: ...)`. **Calchemy expressions are business language** — `gm_rate = (revenue - cogs) / revenue` is instantly readable and verifiable.
+
+</td>
+</tr>
+</table>
+
+### Common Business Scenarios
+
+| Business Need | Calchemy Expression |
+|---------------|---------------------|
+| Calculate gross profit | `calc(df, "gross_profit = revenue - cogs")` |
+| Calculate gross margin | `calc(df, "gm_rate = (revenue - cogs) / revenue >>> %")` |
+| Calculate VAT (13%) | `calc(df, "tax = revenue * 0.13")` |
+| Calculate net profit | `calc(df, "net_profit = revenue - cogs - tax")` |
+| Calculate YoY growth | `calc(df, "yoy = (this_year - last_year) / last_year >>> %")` |
+| Calculate ARPU / AOV | `calc(df, "aov = GMV / orders")` |
+| Calculate per-capita output | `calc(df, "per_capita = total_output / headcount")` |
+| Calculate squared deviation | `calc(df, "squared = (X - mean) ** 2")` |
+| Calculate log return | `calc(df, "log_return = log(close / prev_close)")` |
+| Calculate n-th root | `calc(df, "cuberoot = root(X, 3)")` |
+
+> 💡 Column names support **Chinese** (`销售额`, `成本`) or **common English abbreviations** (`GMV`, `COGS`, `DAU`). The DSL handles both seamlessly.
 
 **Calchemy = Calc + Alchemy**. Turn raw data into business metrics — that's data alchemy.
 
@@ -157,8 +197,8 @@ calc(df, "rate = a / b", errors='ignore')
 
 `calc()` uses a restricted subset of `ast.parse` to evaluate expressions:
 
-- ✅ Allowed: column names (`Name`), numeric constants (`Constant`), arithmetic (`BinOp`), unary +/- (`UnaryOp`)
-- ❌ Rejected: function calls, attribute access, subscripting, comparisons, `eval()`
+- ✅ Allowed: column names (`Name`), numeric constants (`Constant`), arithmetic (`BinOp`), unary +/- (`UnaryOp`), whitelisted functions (`abs`, `log`, `sqrt`, `root`)
+- ❌ Rejected: arbitrary function calls, attribute access, subscripting, comparisons, `eval()`
 
 ```python
 # ❌ These expressions will be rejected
@@ -175,10 +215,15 @@ calc(df, 'r = a > b')                           # Comparison
 calchemy/
 ├── calchemy/               # Package directory
 │   ├── __init__.py         # Public API entry point
-│   └── calchemy.py         # Core DSL implementation
+│   ├── types.py            # Data structures: CalcStep, CalcResult
+│   ├── utils.py            # Validation & formatting utilities
+│   ├── helpers.py          # Calculation helpers (arithmetic + extended ops)
+│   ├── parse.py            # AST parsing & decomposition
+│   ├── calc.py             # Compound expression engine
+│   └── chain.py            # Chain-style API
 ├── tests/                  # Test directory
 │   ├── __init__.py
-│   └── test_calchemy.py   # Test suite (101 cases)
+│   └── test_calchemy.py   # Test suite (124 cases)
 ├── README.md               # Chinese documentation
 ├── README_EN.md            # English documentation (this file)
 └── .gitignore

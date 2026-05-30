@@ -16,7 +16,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/python-3.10+-blue" alt="Python 3.10+">
-  <img src="https://img.shields.io/badge/tests-101%20passing-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-124%20passing-brightgreen" alt="Tests">
   <img src="https://img.shields.io/badge/license-Apache%202.0-green" alt="License">
 </p>
 
@@ -26,14 +26,54 @@
 
 传统 pandas 代码对业务方不可读，也让 LLM 承担不必要的翻译成本。**Calchemy** 用一行自然语言风格的表达式完成列计算：
 
-```python
-# 传统 pandas —— 业务方看不懂，LLM 容易写错
-df["gm_rate"] = (df["revenue"] - df["cogs"]) / df["revenue"]
-df["gm_rate"] = df["gm_rate"].apply(lambda x: f"{x:.2%}" if pd.notna(x) else x)
+### 业务人员也能看懂的对比
 
-# Calchemy —— 业务方能读懂，LLM 直接输出
-calc(df, "gm_rate = (revenue - cogs) / revenue >>> %")
+<table>
+<tr>
+<td width="50%">
+
+**❌ 传统 pandas —— 业务方看不懂的"天书"**
+
+```python
+df["毛利率"] = (
+    df["销售额"] - df["成本"]
+) / df["销售额"]
+df["毛利率"] = df["毛利率"].apply(
+    lambda x: f"{x:.2%}" if pd.notna(x) else x
+)
 ```
+
+</td>
+<td width="50%">
+
+**✅ Calchemy —— 业务方直接能读**
+
+```python
+calc(df, "毛利率 = (销售额 - 成本) / 销售额 >>> %")
+```
+
+> 业务人员不需要理解 `df["毛利率"] = ...` 或 `apply(lambda x: ...)`。**Calchemy 表达式本身就是业务语言**——`毛利率 = (销售额 - 成本) / 销售额`，一眼就能看懂并核对。
+
+</td>
+</tr>
+</table>
+
+### 常见业务场景速查
+
+| 业务需求 | Calchemy 表达式 |
+|---------|----------------|
+| 计算毛利 | `calc(df, "毛利 = 销售额 - 成本")` |
+| 计算毛利率 | `calc(df, "毛利率 = (销售额 - 成本) / 销售额 >>> %")` |
+| 计算增值税（13%） | `calc(df, "税额 = 销售额 * 0.13")` |
+| 计算净利润 | `calc(df, "净利润 = 销售额 - 成本 - 税额")` |
+| 计算同比增长率 | `calc(df, "同比增长 = (本年 - 去年) / 去年 >>> %")` |
+| 计算客单价（GMV / 订单数） | `calc(df, "客单价 = GMV / 订单数")` |
+| 计算人均产出 | `calc(df, "人均产出 = 总产出 / 人数")` |
+| 计算标准差中的平方项 | `calc(df, "平方差 = (X - 均值) ** 2")` |
+| 计算对数收益率 | `calc(df, "对数收益 = log(收盘价 / 昨收)")` |
+| 计算 n 次方根 | `calc(df, "立方根 = root(X, 3)")` |
+
+> 💡 字段名支持**中文**（`销售额`、`成本`）或**常见英文简写**（`GMV`、`COGS`、`DAU`），DSL 自动识别。
 
 **Calchemy = Calc + Alchemy**。把原始数据"炼"成业务指标——这就是数据炼金术。
 
@@ -66,25 +106,25 @@ import pandas as pd
 from calchemy import calc
 
 df = pd.DataFrame({
-    "revenue": [100, 200, 0, 400],
-    "cogs":    [60,  150, 0, 300],
+    "销售额": [100, 200, 0, 400],
+    "成本":   [60,  150, 0, 300],
 })
 
-# 混合运算 + 百分比格式
-calc(df, "margin = revenue - cogs")
-calc(df, "margin_rate = margin / revenue >>> %")
+# 混合运算 + 百分比格式（字段名直接用中文！）
+calc(df, "毛利 = 销售额 - 成本")
+calc(df, "毛利率 = 毛利 / 销售额 >>> %")
 
-print(df[["revenue", "cogs", "margin", "margin_rate"]])
+print(df[["销售额", "成本", "毛利", "毛利率"]])
 ```
 
 输出：
 
 ```
-   revenue  cogs  margin margin_rate
-0      100    60      40       40.00%
-1      200   150      50       25.00%
-2        0     0       0         nan
-3      400   300     100       25.00%
+   销售额  成本  毛利   毛利率
+0    100   60   40  40.00%
+1    200  150   50  25.00%
+2      0    0    0     nan
+3    400  300  100  25.00%
 ```
 
 ---
@@ -157,8 +197,8 @@ calc(df, "rate = a / b", errors='ignore')
 
 `calc()` 使用 `ast.parse` 受限子集解析表达式：
 
-- ✅ 允许：列名（`Name`）、数字常量（`Constant`）、四则运算（`BinOp`）、正负号（`UnaryOp`）
-- ❌ 禁止：函数调用、属性访问、下标、比较运算、`eval()`
+- ✅ 允许：列名（`Name`）、数字常量（`Constant`）、四则运算（`BinOp`）、正负号（`UnaryOp`）、白名单函数（`abs`/`log`/`sqrt`/`root`）
+- ❌ 禁止：任意函数调用、属性访问、下标、比较运算、`eval()`
 
 ```python
 # ❌ 以下表达式会被拒绝
@@ -175,10 +215,15 @@ calc(df, 'r = a > b')                           # 比较运算
 calchemy/
 ├── calchemy/               # 包目录
 │   ├── __init__.py         # 公共 API 入口
-│   └── calchemy.py         # 核心 DSL 实现
+│   ├── types.py            # 数据结构：CalcStep, CalcResult
+│   ├── utils.py            # 校验与格式化工具
+│   ├── helpers.py          # 运算 helper（四则运算 + 扩展运算）
+│   ├── parse.py            # AST 解析与拆解
+│   ├── calc.py             # 混合运算引擎
+│   └── chain.py            # 链式调用 API
 ├── tests/                  # 测试目录
 │   ├── __init__.py
-│   └── test_calchemy.py   # 测试套件（101 用例）
+│   └── test_calchemy.py   # 测试套件（124 用例）
 ├── README.md               # 中文文档（本文件）
 ├── README_EN.md            # English documentation
 └── .gitignore
