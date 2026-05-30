@@ -4,8 +4,10 @@ Calchemy — A declarative DSL for DataFrame column calculations.
 Every DataFrame has gold in it. Calchemy helps you extract it.
 """
 
-from calchemy.calchemy import calc_div, calc_add, calc_sub, calc_mul, calc
-from calchemy.calchemy import _BINOP_MAP, _UNARYOP_MAP
+from calchemy.helpers import calc_div, calc_add, calc_sub, calc_mul
+from calchemy.calc import calc
+from calchemy.parse import _BINOP_MAP, _UNARYOP_MAP
+from calchemy.types import CalcStep, CalcResult
 
 __all__ = [
     "calc_div",
@@ -13,6 +15,8 @@ __all__ = [
     "calc_sub",
     "calc_mul",
     "calc",
+    "CalcStep",
+    "CalcResult",
     "_BINOP_MAP",
     "_UNARYOP_MAP",
 ]
