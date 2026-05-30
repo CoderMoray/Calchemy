@@ -106,7 +106,8 @@ tax = revenue * 0.13
 ```
 
 **Operands**: column names (unquoted) or numeric constants
-**Operators**: `+` `-` `*` `/`
+**Operators**: `+` `-` `*` `/` `**` `^`
+**Functions**: `abs(col)` `log(col)` `log(col, base)` `sqrt(col)`
 **Format suffix** (after `>>>`): `%`/`pct`/`percent` → percentage; omitted → float
 
 ### API Reference
@@ -194,9 +195,9 @@ calchemy/
 | Phase 2.5 | Project restructuring: standard Python package | ✅ Done |
 | Phase 3 | Compound expression engine `calc()` (parentheses + constants) | ✅ Done |
 | Phase 3.5 | Decompose engine `_calc_decompose()`: step-by-step execution + lineage tracking | ✅ Done |
-| Phase 4 | Chain-style API: `Calchemy` class | 🔲 Upcoming |
-| Phase 4.5 | LLM Function Calling schema + Skill docs | 🔲 Upcoming |
-| Phase 5 | Extended operators (exponent `**`, logarithm `log`, etc.) | 🔲 Planned |
+| Phase 4 | Chain-style API: `Calchemy` class | ✅ Done (111 tests) |
+| Phase 4.5 | Extended operators (exponent `**`, logarithm `log`, absolute `abs`, etc.) | 🔲 Upcoming |
+| Phase 5 | LLM Function Calling schema + Skill docs | 🔲 Planned |
 | Phase 6 | Multi-backend support (polars / SQL) | 🔲 Planned |
 | Phase 7 | Metric registry + lineage graph | 🔲 Planned |
 
@@ -208,7 +209,7 @@ calchemy/
 2. **Column Names as Documentation**: DSL expressions ARE the readable documentation for business logic
 3. **Defensive First**: Type checking before operations; precise errors over silent coercion
 4. **LLM-Friendly**: Function signatures and docstrings designed for direct LLM invocation
-5. **Backend-Portable**: Same DSL runs on different backends (Phase 5)
+5. **Backend-Portable**: Same DSL runs on different backends (Phase 6)
 
 ---
 
