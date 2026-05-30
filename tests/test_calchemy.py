@@ -9,7 +9,7 @@ import pytest
 import pandas as pd
 import numpy as np
 
-from calchemy import calc_add, calc_sub, calc_mul, calc_div, calc
+from calchemy import calc_add, calc_sub, calc_mul, calc_div, calc, Calchemy
 from calchemy.calc import _calc_decompose
 from calchemy.types import CalcResult, CalcStep
 
@@ -753,3 +753,219 @@ class TestCalcDecompose:
         assert isinstance(result.steps, list)
         assert all(isinstance(s, CalcStep) for s in result.steps)
         assert isinstance(result.tmp_columns, list)
+
+
+class TestCalchemyChain:
+    """测试 Calchemy 链式调用类（Phase 4）。"""
+
+    def test_basic_chain(self):
+        """基础链式调用。"""
+        df = pd.DataFrame({"B": [10, 20], "C": [5, 8]})
+        result = Calchemy(df).calc("A = B + C").result()
+        assert "A" in result.columns
+        assert result["A"].tolist() == [15.0, 28.0]
+
+    def test_does_not_modify_original_df(self):
+        """原始 DataFrame 不被修改。"""
+        df = pd.DataFrame({"B": [10, 20], "C": [5, 8]})
+        original_cols = list(df.columns)
+        Calchemy(df).calc("A = B + C").result()
+        assert list(df.columns) == original_cols
+        assert "A" not in df.columns
+
+    def test_multi_step_chain(self):
+        """多步链式调用。"""
+        df = pd.DataFrame({"revenue": [100, 200], "cost": [40, 80]})
+        result = (Calchemy(df)
+                  .calc("margin = revenue - cost")
+                  .calc("margin_rate = margin / revenue >>> %")
+                  .result())
+        assert "margin" in result.columns
+        assert "margin_rate" in result.columns
+        assert result["margin"].tolist() == [60.0, 120.0]
+
+    def test_steps_accumulated(self):
+        """steps 跨调用累积。"""
+        df = pd.DataFrame({"B": [10, 20], "C": [5, 8]})
+        chain = Calchemy(df).calc("A = B + C").calc("D = A * 2")
+        assert len(chain.steps) > 0
+        step_exprs = [s.expression for s in chain.steps]
+        assert any("A" in e for e in step_exprs)
+
+    def test_tmp_columns_with_keep_tmp(self):
+        """keep_tmp=True 时 tmp_columns 累积。"""
+        df = pd.DataFrame({"B": [10, 20], "C": [5, 8], "D": [2, 3]})
+        chain = Calchemy(df).calc("A = B + C / D", keep_tmp=True)
+        assert len(chain.tmp_columns) > 0
+        # 验证临时列确实在 result 中
+        for col in chain.tmp_columns:
+            assert col in chain.result().columns
+
+    def test_empty_chain(self):
+        """不调用 calc() 直接 result()。"""
+        df = pd.DataFrame({"B": [10, 20]})
+        result = Calchemy(df).result()
+        assert "B" in result.columns
+        assert len(result.columns) == 1
+
+    def test_lineage_single_col(self):
+        """lineage 追踪单列血缘。"""
+        df = pd.DataFrame({"revenue": [100, 200], "cost": [40, 80]})
+        chain = (Calchemy(df)
+                 .calc("margin = revenue - cost")
+                 .calc("margin_rate = margin / revenue >>> %"))
+        deps = chain.lineage("margin")
+        assert "revenue" in deps
+        assert "cost" in deps
+
+    def test_lineage_all_cols(self):
+        """lineage 返回所有列映射。"""
+        df = pd.DataFrame({"revenue": [100, 200], "cost": [40, 80]})
+        chain = Calchemy(df).calc("margin = revenue - cost")
+        mapping = chain.lineage()
+        assert "margin" in mapping
+        assert "revenue" in mapping["margin"]
+        assert "cost" in mapping["margin"]
+
+    def test_chaining_with_parentheses(self):
+        """括号表达式链式调用。"""
+        df = pd.DataFrame({"revenue": [100, 200], "cogs": [40, 80]})
+        result = (Calchemy(df)
+                  .calc("gm_rate = (revenue - cogs) / revenue >>> %")
+                  .result())
+        assert result["gm_rate"].tolist() == ["60.00%", "60.00%"]
+
+    def test_chaining_with_scalar(self):
+        """常量参与链式调用。"""
+        df = pd.DataFrame({"revenue": [100, 200]})
+        result = (Calchemy(df)
+                  .calc("tax = revenue * 0.13")
+                  .result())
+        assert result["tax"].tolist() == [13.0, 26.0]
+
+    def test_parameter_rounding(self):
+        """rounding 参数正确传递。"""
+        df = pd.DataFrame({"B": [10, 20], "C": [3, 7]})
+        result = Calchemy(df).calc("A = B / C", rounding=4).result()
+        assert result["A"].tolist() == [round(10 / 3, 4), round(20 / 7, 4)]
+
+    def test_parameter_errors_raise(self):
+        """errors='raise' 参数正确传递。"""
+        df = pd.DataFrame({"B": [10, 0], "C": [5, 0]})
+        chain = Calchemy(df)
+        with pytest.raises(ValueError):
+            chain.calc("A = B / C", errors='raise')
+
+    def test_result_returns_same_instance(self):
+        """多次 result() 返回同一 DataFrame 实例。"""
+        df = pd.DataFrame({"B": [10, 20], "C": [5, 8]})
+        chain = Calchemy(df).calc("A = B + C")
+        r1 = chain.result()
+        r2 = chain.result()
+        assert r1 is r2
+
+    def test_chaining_returns_self(self):
+        """calc() 返回 self 支持链式。"""
+        df = pd.DataFrame({"B": [10, 20], "C": [5, 8]})
+        chain = Calchemy(df)
+        returned = chain.calc("A = B + C")
+        assert returned is chain
+
+
+# ──────────────────────────────────────────────
+# Calchemy 链式调用类测试
+# ──────────────────────────────────────────────
+
+class TestCalchemyChain:
+    """测试 Calchemy 链式调用类。"""
+
+    def test_basic_chain(self):
+        """基础链式调用。"""
+        df = pd.DataFrame({"B": [10, 20], "C": [5, 8]})
+        result = (Calchemy(df)
+                  .calc("A = B + C")
+                  .result())
+        assert "A" in result.columns
+        assert result["A"].tolist() == [15.0, 28.0]
+
+    def test_does_not_modify_original_df(self):
+        """原始 DataFrame 不被修改。"""
+        df = pd.DataFrame({"B": [10, 20], "C": [5, 8]})
+        original_cols = list(df.columns)
+        (Calchemy(df)
+         .calc("A = B + C")
+         .result())
+        assert list(df.columns) == original_cols
+        assert "A" not in df.columns
+
+    def test_multi_step_chain(self):
+        """多步链式调用。"""
+        df = pd.DataFrame({"revenue": [100, 200], "cost": [40, 80]})
+        result = (Calchemy(df)
+                  .calc("margin = revenue - cost")
+                  .calc("margin_rate = margin / revenue >>> %")
+                  .result())
+        assert "margin" in result.columns
+        assert "margin_rate" in result.columns
+        assert result["margin"].tolist() == [60.0, 120.0]
+
+    def test_steps_accumulated(self):
+        """steps 跨调用累积。"""
+        df = pd.DataFrame({"B": [10, 20], "C": [5, 8]})
+        chain = (Calchemy(df)
+                 .calc("A = B + C")
+                 .calc("D = A * 2"))
+        assert len(chain.steps) > 0
+        # 第二步应该引用了 A
+        step_exprs = [s.expression for s in chain.steps]
+        assert any("A" in e for e in step_exprs)
+
+    def test_tmp_columns_with_keep_tmp(self):
+        """keep_tmp=True 时 tmp_columns 有值。"""
+        df = pd.DataFrame({"B": [10, 20], "C": [5, 8], "D": [2, 3]})
+        chain = (Calchemy(df)
+                 .calc("A = B + C / D", keep_tmp=True))
+        assert len(chain.tmp_columns) > 0
+
+    def test_empty_chain(self):
+        """不调用 calc() 直接 result()。"""
+        df = pd.DataFrame({"B": [10, 20]})
+        result = Calchemy(df).result()
+        assert "B" in result.columns
+        assert len(result.columns) == 1
+
+    def test_lineage_single_col(self):
+        """lineage 追踪单列血缘。"""
+        df = pd.DataFrame({"revenue": [100, 200], "cost": [40, 80]})
+        chain = (Calchemy(df)
+                 .calc("margin = revenue - cost")
+                 .calc("margin_rate = margin / revenue >>> %"))
+        deps = chain.lineage("margin")
+        assert "revenue" in deps
+        assert "cost" in deps
+
+    def test_lineage_all_cols(self):
+        """lineage 返回所有列映射。"""
+        df = pd.DataFrame({"revenue": [100, 200], "cost": [40, 80]})
+        chain = (Calchemy(df)
+                 .calc("margin = revenue - cost"))
+        mapping = chain.lineage()
+        assert "margin" in mapping
+        assert "revenue" in mapping["margin"]
+        assert "cost" in mapping["margin"]
+
+    def test_chaining_with_parentheses(self):
+        """括号表达式链式调用。"""
+        df = pd.DataFrame({"revenue": [100, 200], "cogs": [40, 80]})
+        result = (Calchemy(df)
+                  .calc("gm_rate = (revenue - cogs) / revenue >>> %")
+                  .result())
+        assert result["gm_rate"].tolist() == ["60.00%", "60.00%"]
+
+    def test_parameter_propagation(self):
+        """rounding/format/errors 参数正确传递。"""
+        df = pd.DataFrame({"B": [10, 20], "C": [3, 7]})
+        result = (Calchemy(df)
+                  .calc("A = B / C", rounding=4)
+                  .result())
+        assert result["A"].tolist() == [round(10/3, 4), round(20/7, 4)]
