@@ -5,10 +5,51 @@ Every DataFrame has gold in it. Calchemy helps you extract it.
 """
 
 import ast
+from dataclasses import dataclass, field
 from typing import Union
 
 import pandas as pd
 import numpy as np
+
+
+# ──────────────────────────────────────────────
+# 数据类
+# ──────────────────────────────────────────────
+
+@dataclass
+class CalcStep:
+    """拆解引擎中的单步计算记录。
+
+    Attributes
+    ----------
+    expression : str
+        本步的表达式，如 ``"revenue - cogs"``。
+    result_col : str
+        本步结果列名，如 ``"__calc_tmp_1"`` 或 ``"gm_rate"``。
+    operator : str
+        运算符，如 ``"+"``, ``"-"``, ``"*"``, ``"/"``, ``"- (unary)"``。
+    """
+    expression: str
+    result_col: str
+    operator: str
+
+
+@dataclass
+class CalcResult:
+    """拆解引擎的完整返回结果。
+
+    Attributes
+    ----------
+    df : pd.DataFrame
+        结果 DataFrame（与输入为同一实例）。
+    steps : list[CalcStep]
+        拆解步骤列表，按执行顺序排列。
+    tmp_columns : list[str]
+        临时变量列名列表。
+    """
+    df: pd.DataFrame
+    steps: list[CalcStep] = field(default_factory=list)
+    tmp_columns: list[str] = field(default_factory=list)
 
 
 # ──────────────────────────────────────────────
@@ -726,9 +767,279 @@ def _eval_ast_node(
     )
 
 
+def _decompose_ast(
+    node: ast.AST,
+    df: pd.DataFrame,
+    errors: str,
+    collected_cols: list[str],
+    tmp_counter: list[int],
+    steps: list[CalcStep],
+) -> Union[str, float, int]:
+    """递归拆解 AST 节点，生成逐步计算记录。
+
+    与 ``_eval_ast_node`` 不同，本函数返回**列名字符串**或**标量值**，
+    而非 Series。每个二元运算生成一个临时列 ``__calc_tmp_N``，
+    并通过 helper 函数完成实际计算。
+
+    Parameters
+    ----------
+    node : ast.AST
+        要拆解的 AST 节点。
+    df : pd.DataFrame
+        数据源（原地修改）。
+    errors : str
+        异常处理模式（'coerce' / 'raise' / 'ignore'）。
+    collected_cols : list[str]
+        收集到的所有列名（用于错误消息）。
+    tmp_counter : list[int]
+        临时列计数器，长度为 1，通过 ``tmp_counter[0]`` 递增。
+    steps : list[CalcStep]
+        拆解步骤列表，每步追加一条记录。
+
+    Returns
+    -------
+    str | float | int
+        列名字符串（表示临时列或原始列）或标量值。
+
+    Raises
+    ------
+    ValueError
+        遇到不允许的 AST 节点类型或运算符。
+    KeyError
+        引用的列名不存在。
+    """
+    # 常量：数字字面量 → 返回标量值
+    if isinstance(node, ast.Constant):
+        if isinstance(node.value, (int, float)):
+            return node.value
+        raise ValueError(
+            f"不支持的字面量类型：{type(node.value).__name__}（值：{node.value!r}），"
+            f"仅支持整数和浮点数。"
+        )
+
+    # 名称：列名引用 → 返回列名字符串（不返回 Series）
+    if isinstance(node, ast.Name):
+        col_name = node.id
+        collected_cols.append(col_name)
+        if col_name not in df.columns:
+            raise KeyError(
+                f"列 '{col_name}' 不存在于 DataFrame 中，可用列：{list(df.columns)}"
+            )
+        return col_name
+
+    # 二元运算
+    if isinstance(node, ast.BinOp):
+        op_type = type(node.op)
+        if op_type not in _BINOP_MAP:
+            raise ValueError(
+                f"不支持的运算符：{type(node.op).__name__}，"
+                f"仅支持 +、-、*、/ 四则运算。"
+            )
+        op_symbol = _BINOP_MAP[op_type]
+
+        left_ref = _decompose_ast(
+            node.left, df, errors, collected_cols, tmp_counter, steps
+        )
+        right_ref = _decompose_ast(
+            node.right, df, errors, collected_cols, tmp_counter, steps
+        )
+
+        # 两个操作数都是标量 → 直接用 Python 算，不走 helper
+        if not isinstance(left_ref, str) and not isinstance(right_ref, str):
+            if op_symbol == '+':
+                return left_ref + right_ref
+            elif op_symbol == '-':
+                return left_ref - right_ref
+            elif op_symbol == '*':
+                return left_ref * right_ref
+            elif op_symbol == '/':
+                if right_ref == 0:
+                    return float('nan') if left_ref == 0 else 0
+                return left_ref / right_ref
+
+        # 标量操作数 → 先添加为临时列
+        if not isinstance(left_ref, str):
+            tmp_counter[0] += 1
+            scalar_col = f"__calc_tmp_{tmp_counter[0]}"
+            df[scalar_col] = float(left_ref)
+            left_ref = scalar_col
+
+        if not isinstance(right_ref, str):
+            tmp_counter[0] += 1
+            scalar_col = f"__calc_tmp_{tmp_counter[0]}"
+            df[scalar_col] = float(right_ref)
+            right_ref = scalar_col
+
+        # 现在 left_ref 和 right_ref 都是列名字符串
+        tmp_counter[0] += 1
+        tmp_col = f"__calc_tmp_{tmp_counter[0]}"
+        expr_str = f"{tmp_col} = {left_ref} {op_symbol} {right_ref}"
+
+        # 调用对应 helper（中间步骤不格式化，高精度 rounding 避免精度损失）
+        if op_symbol == '+':
+            calc_add(df, expr_str, rounding=15, format=None, errors=errors)
+        elif op_symbol == '-':
+            calc_sub(df, expr_str, rounding=15, format=None, errors=errors)
+        elif op_symbol == '*':
+            calc_mul(df, expr_str, rounding=15, format=None, errors=errors)
+        elif op_symbol == '/':
+            calc_div(df, expr_str, rounding=15, format=None, errors=errors)
+
+        steps.append(
+            CalcStep(expression=expr_str, result_col=tmp_col, operator=op_symbol)
+        )
+        return tmp_col
+
+    # 一元运算
+    if isinstance(node, ast.UnaryOp):
+        op_type = type(node.op)
+        if op_type not in _UNARYOP_MAP:
+            raise ValueError(
+                f"不支持的一元运算符：{type(node.op).__name__}，"
+                f"仅支持正号(+)和负号(-)。"
+            )
+        op_symbol = _UNARYOP_MAP[op_type]
+
+        operand_ref = _decompose_ast(
+            node.operand, df, errors, collected_cols, tmp_counter, steps
+        )
+
+        if op_symbol == '+':
+            return operand_ref
+        elif op_symbol == '-':
+            if isinstance(operand_ref, str):
+                # 列名 → 取反并生成临时列
+                if errors == 'raise' and df[operand_ref].isna().any():
+                    problem_rows = df.index[df[operand_ref].isna()]
+                    raise ValueError(
+                        f"列 '{operand_ref}' 在以下行存在 NaN 数据"
+                        f"（索引）：{problem_rows.tolist()[:10]}..."
+                    )
+                tmp_counter[0] += 1
+                tmp_col = f"__calc_tmp_{tmp_counter[0]}"
+                df[tmp_col] = -df[operand_ref]
+                steps.append(CalcStep(
+                    expression=f"{tmp_col} = -{operand_ref}",
+                    result_col=tmp_col,
+                    operator="- (unary)",
+                ))
+                return tmp_col
+            else:
+                # 标量 → 直接取反
+                return -operand_ref
+
+    # 不允许的节点类型
+    raise ValueError(
+        f"不支持的表达式元素：{type(node).__name__}。"
+        f"仅支持列名、数字常量和 +、-、*、/ 四则运算。"
+    )
+
+
 # ──────────────────────────────────────────────
 # 混合运算引擎
 # ──────────────────────────────────────────────
+
+def _calc_decompose(
+    df: pd.DataFrame,
+    expr: str,
+    rounding: int = 2,
+    format: str | None = None,
+    errors: str = 'coerce',
+    keep_tmp: bool = False,
+) -> CalcResult:
+    """拆解混合运算表达式，返回 CalcResult 对象（含步骤记录）。
+
+    与 ``calc()`` 相同的计算逻辑，但额外记录每步拆解过程，
+    并可选择保留中间临时列。
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        待处理的 DataFrame（原地修改）。
+    expr : str
+        计算表达式，格式与 ``calc()`` 一致。
+    rounding : int, default 2
+        保留的小数位数。
+    format : str, optional
+        输出格式（'percent'/'pct'/'%'/'percentage' 等）。
+    errors : {'coerce', 'raise', 'ignore'}, default 'coerce'
+        异常数据处理方式。
+    keep_tmp : bool, default False
+        是否保留 ``__calc_tmp_*`` 临时列。
+
+    Returns
+    -------
+    CalcResult
+        包含结果 DataFrame、拆解步骤和临时列信息的对象。
+    """
+    # 1. 解析格式后缀 & 校验 errors
+    expr, format = _parse_format_suffix(expr, format)
+    _validate_errors(errors)
+
+    # 2. 分离新列名和计算表达式
+    if expr.count('=') != 1:
+        raise ValueError(
+            f"格式错误，期望 'new = expression'，收到：'{expr}'，原因：'=' 数量不为 1。"
+        )
+
+    new_col = expr.split('=')[0].strip()
+    calc_expr = expr.split('=')[1].strip()
+
+    if not new_col:
+        raise ValueError(
+            f"格式错误，新列名为空，期望 'new = expression'，收到：'{expr}'。"
+        )
+    if not calc_expr:
+        raise ValueError(
+            f"格式错误，计算表达式为空，期望 'new = expression'，收到：'{expr}'。"
+        )
+
+    # 3. 用 ast.parse 解析表达式（受限子集）
+    try:
+        tree = ast.parse(calc_expr, mode='eval')
+    except SyntaxError as e:
+        raise ValueError(
+            f"表达式语法错误：'{calc_expr}'，原因：{e.msg}。"
+            f"仅支持列名、数字常量和 +、-、*、/ 四则运算。"
+        )
+
+    root = tree.body
+
+    # 4. 递归拆解 AST
+    collected_cols: list[str] = []
+    tmp_counter: list[int] = [0]
+    steps: list[CalcStep] = []
+    result_ref = _decompose_ast(root, df, errors, collected_cols, tmp_counter, steps)
+
+    # 5. 写入 DataFrame
+    is_multi_index = isinstance(df.index, pd.MultiIndex)
+
+    if isinstance(result_ref, str):
+        # result_ref 是列名字符串（临时列或原始列）
+        if is_multi_index:
+            df[new_col] = df[result_ref].values
+        else:
+            df.loc[:, new_col] = df[result_ref].values
+        # 不在这里删除临时结果列，统一在步骤 7 处理（keep_tmp 控制）
+    else:
+        # 标量结果
+        if is_multi_index:
+            df[new_col] = result_ref
+        else:
+            df.loc[:, new_col] = result_ref
+
+    # 6. 格式化输出
+    _apply_format(df, new_col, format, rounding, is_multi_index)
+
+    # 7. 收集并清理临时列
+    tmp_columns = [c for c in df.columns if c.startswith("__calc_tmp_")]
+    if not keep_tmp:
+        for col in tmp_columns:
+            del df[col]
+        tmp_columns = []
+
+    return CalcResult(df=df, steps=steps, tmp_columns=tmp_columns)
+
 
 def calc(
     df: pd.DataFrame,
@@ -801,60 +1112,5 @@ def calc(
     1    26.0
     Name: tax, dtype: float64
     """
-    # 1. 解析格式后缀 & 校验 errors
-    expr, format = _parse_format_suffix(expr, format)
-    _validate_errors(errors)
-
-    # 2. 分离新列名和计算表达式
-    if expr.count('=') != 1:
-        raise ValueError(
-            f"格式错误，期望 'new = expression'，收到：'{expr}'，原因：'=' 数量不为 1。"
-        )
-
-    new_col = expr.split('=')[0].strip()
-    calc_expr = expr.split('=')[1].strip()
-
-    if not new_col:
-        raise ValueError(
-            f"格式错误，新列名为空，期望 'new = expression'，收到：'{expr}'。"
-        )
-    if not calc_expr:
-        raise ValueError(
-            f"格式错误，计算表达式为空，期望 'new = expression'，收到：'{expr}'。"
-        )
-
-    # 3. 用 ast.parse 解析表达式（受限子集）
-    try:
-        tree = ast.parse(calc_expr, mode='eval')
-    except SyntaxError as e:
-        raise ValueError(
-            f"表达式语法错误：'{calc_expr}'，原因：{e.msg}。"
-            f"仅支持列名、数字常量和 +、-、*、/ 四则运算。"
-        )
-
-    # ast.parse('expr', mode='eval') 返回 Expression，其 body 才是实际节点
-    root = tree.body
-
-    # 4. 递归求值 AST
-    collected_cols: list[str] = []
-    result = _eval_ast_node(root, df, errors, collected_cols)
-
-    # 5. 写入 DataFrame
-    is_multi_index = isinstance(df.index, pd.MultiIndex)
-
-    if isinstance(result, pd.Series):
-        if is_multi_index:
-            df[new_col] = result
-        else:
-            df.loc[:, new_col] = result
-    else:
-        # 标量结果（如 calc(df, "x = 1 + 2")）
-        if is_multi_index:
-            df[new_col] = result
-        else:
-            df.loc[:, new_col] = result
-
-    # 6. 格式化输出
-    _apply_format(df, new_col, format, rounding, is_multi_index)
-
-    return df
+    result = _calc_decompose(df, expr, rounding=rounding, format=format, errors=errors)
+    return result.df

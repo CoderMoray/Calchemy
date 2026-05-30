@@ -667,3 +667,90 @@ class TestCalc:
         df = pd.DataFrame({'a': [1.0], 'b': [2.0]})
         result = calc(df, 'r = a + b')
         assert result is df
+
+
+# ──────────────────────────────────────────────
+# 拆解引擎 _calc_decompose 测试
+# ──────────────────────────────────────────────
+
+class TestCalcDecompose:
+    """测试 _calc_decompose 拆解引擎。"""
+
+    def test_simple_addition(self):
+        """A = B + C → 1 步拆解。"""
+        df = pd.DataFrame({"B": [10, 20], "C": [5, 8]})
+        from calchemy.calchemy import _calc_decompose, CalcResult
+        result = _calc_decompose(df, "A = B + C")
+        assert isinstance(result, CalcResult)
+        assert len(result.steps) == 1
+        assert result.steps[0].operator == '+'
+        assert "A" in result.df.columns
+        assert list(result.df["A"]) == [15.0, 28.0]
+
+    def test_complex_three_operand(self):
+        """A = B + C / D → 2 步。"""
+        df = pd.DataFrame({"B": [10, 20], "C": [6, 8], "D": [3, 4]})
+        from calchemy.calchemy import _calc_decompose
+        result = _calc_decompose(df, "A = B + C / D")
+        assert len(result.steps) == 2
+        # Step 1: C / D
+        assert result.steps[0].operator == '/'
+        # Step 2: B + __calc_tmp_1
+        assert result.steps[1].operator == '+'
+        # A = B + C/D = 10 + 2 = 12, 20 + 2 = 22
+        assert list(result.df["A"]) == [12.0, 22.0]
+
+    def test_parentheses(self):
+        """A = (B + C) * D → 2 步。"""
+        df = pd.DataFrame({"B": [1, 2], "C": [3, 4], "D": [5, 6]})
+        from calchemy.calchemy import _calc_decompose
+        result = _calc_decompose(df, "A = (B + C) * D")
+        assert len(result.steps) == 2
+        assert result.steps[0].operator == '+'
+        assert result.steps[1].operator == '*'
+        # (1+3)*5=20, (2+4)*6=36
+        assert list(result.df["A"]) == [20.0, 36.0]
+
+    def test_nested_parentheses(self):
+        """A = (B + C) / (E - F) → 3 步。"""
+        df = pd.DataFrame({"B": [10, 20], "C": [5, 10], "E": [3, 6], "F": [1, 2]})
+        from calchemy.calchemy import _calc_decompose
+        result = _calc_decompose(df, "A = (B + C) / (E - F)")
+        assert len(result.steps) == 3
+        # Step 1: B+C=15,30  Step 2: E-F=2,4  Step 3: 15/2=7.5, 30/4=7.5
+        assert list(result.df["A"]) == [7.5, 7.5]
+
+    def test_keep_tmp_true(self):
+        """keep_tmp=True 保留临时列。"""
+        df = pd.DataFrame({"B": [10, 20], "C": [5, 8]})
+        from calchemy.calchemy import _calc_decompose
+        result = _calc_decompose(df, "A = B + C", keep_tmp=True)
+        tmp_cols = [c for c in result.df.columns if c.startswith("__calc_tmp_")]
+        assert len(tmp_cols) > 0
+
+    def test_keep_tmp_false_default(self):
+        """默认清理临时列。"""
+        df = pd.DataFrame({"B": [10, 20], "C": [5, 8]})
+        from calchemy.calchemy import _calc_decompose
+        result = _calc_decompose(df, "A = B + C")
+        tmp_cols = [c for c in result.df.columns if c.startswith("__calc_tmp_")]
+        assert len(tmp_cols) == 0
+
+    def test_calc_api_unchanged(self):
+        """calc() 公开 API 行为不变（回归测试）。"""
+        df = pd.DataFrame({"revenue": [100, 200], "cogs": [40, 80]})
+        result_df = calc(df, "gm = revenue - cogs")
+        assert isinstance(result_df, pd.DataFrame)
+        assert "gm" in result_df.columns
+        assert list(result_df["gm"]) == [60.0, 120.0]
+
+    def test_calc_result_object_structure(self):
+        """CalcResult 对象结构验证。"""
+        df = pd.DataFrame({"B": [10], "C": [5]})
+        from calchemy.calchemy import _calc_decompose, CalcResult, CalcStep
+        result = _calc_decompose(df, "A = B + C")
+        assert isinstance(result, CalcResult)
+        assert isinstance(result.df, pd.DataFrame)
+        assert isinstance(result.steps, list)
+        assert all(isinstance(s, CalcStep) for s in result.steps)
+        assert isinstance(result.tmp_columns, list)
