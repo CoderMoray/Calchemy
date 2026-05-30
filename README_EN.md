@@ -16,8 +16,8 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/python-3.10+-blue" alt="Python 3.10+">
-  <img src="https://img.shields.io/badge/tests-56%20passing-brightgreen" alt="Tests">
-  <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
+  <img src="https://img.shields.io/badge/tests-101%20passing-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/license-Apache%202.0-green" alt="License">
 </p>
 
 ---
@@ -57,7 +57,7 @@ calc(df, "gm_rate = (revenue - cogs) / revenue >>> %")
 pip install calchemy
 ```
 
-Or copy `calchemy.py` into your project. Only `pandas` and `numpy` are required.
+Or copy the `calchemy/` directory into your project. Only `pandas` and `numpy` are required.
 
 ### 30-Second Example
 
@@ -172,10 +172,14 @@ calc(df, 'r = a > b')                           # Comparison
 
 ```
 calchemy/
-├── calchemy.py           # Core DSL implementation
-├── test_calchemy.py      # Test suite (56+ cases)
-├── README.md             # Chinese documentation
-├── README_EN.md          # English documentation (this file)
+├── calchemy/               # Package directory
+│   ├── __init__.py         # Public API entry point
+│   └── calchemy.py         # Core DSL implementation
+├── tests/                  # Test directory
+│   ├── __init__.py
+│   └── test_calchemy.py   # Test suite (101 cases)
+├── README.md               # Chinese documentation
+├── README_EN.md            # English documentation (this file)
 └── .gitignore
 ```
 
@@ -187,10 +191,14 @@ calchemy/
 |-------|---------|--------|
 | Phase 1 | Division `calc_div` | ✅ Done |
 | Phase 2 | Add/sub/mul helpers + unified `errors` param | ✅ Done |
+| Phase 2.5 | Project restructuring: standard Python package | ✅ Done |
 | Phase 3 | Compound expression engine `calc()` (parentheses + constants) | ✅ Done |
-| Phase 4 | LLM Function Calling schema + Skill docs | 🔲 Upcoming |
-| Phase 5 | Multi-backend support (polars / SQL) | 🔲 Planned |
-| Phase 6 | Metric registry + lineage graph | 🔲 Planned |
+| Phase 3.5 | Decompose engine `_calc_decompose()`: step-by-step execution + lineage tracking | ✅ Done |
+| Phase 4 | Chain-style API: `Calchemy` class | 🔲 Upcoming |
+| Phase 4.5 | LLM Function Calling schema + Skill docs | 🔲 Upcoming |
+| Phase 5 | Extended operators (exponent `**`, logarithm `log`, etc.) | 🔲 Planned |
+| Phase 6 | Multi-backend support (polars / SQL) | 🔲 Planned |
+| Phase 7 | Metric registry + lineage graph | 🔲 Planned |
 
 ---
 
@@ -206,4 +214,4 @@ calchemy/
 
 ## License
 
-MIT
+Apache 2.0
