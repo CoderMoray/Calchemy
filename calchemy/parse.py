@@ -11,7 +11,7 @@ import pandas as pd
 import numpy as np
 
 from calchemy.types import CalcStep
-from calchemy.helpers import calc_add, calc_sub, calc_mul, calc_div
+from calchemy.helpers import calc_add, calc_sub, calc_mul, calc_div, calc_pow, calc_abs, calc_log, calc_sqrt, calc_root
 
 
 # ──────────────────────────────────────────────
@@ -24,6 +24,8 @@ _BINOP_MAP: dict[type, str] = {
     ast.Sub: '-',
     ast.Mult: '*',
     ast.Div: '/',
+    ast.Pow: '**',
+    ast.BitXor: '^',  # Excel 风格指数，Python 中 ^ 是按位异或，但 DSL 中解释为指数
 }
 
 # 允许的一元运算符映射
@@ -62,6 +64,47 @@ def _eval_ast_node(
     ValueError
         遇到不允许的 AST 节点类型。
     """
+    # 函数调用
+    if isinstance(node, ast.Call):
+        if not isinstance(node.func, ast.Name):
+            raise ValueError(
+                f"仅支持简单函数调用（如 abs(B)），不支持 {type(node.func).__name__}"
+            )
+        func_name = node.func.id
+        allowed_funcs = {'abs', 'log', 'sqrt', 'root'}
+        if func_name not in allowed_funcs:
+            raise ValueError(
+                f"不支持的函数 '{func_name}'。支持的函数：{', '.join(sorted(allowed_funcs))}"
+            )
+
+        args = []
+        for arg in node.args:
+            args.append(_eval_ast_node(arg, df, errors, collected_cols))
+
+        import math, numpy as np
+        if func_name == 'abs':
+            if hasattr(args[0], 'abs'):
+                return args[0].abs()
+            return abs(args[0])
+        elif func_name == 'log':
+            if hasattr(args[0], '__iter__'):
+                if len(args) == 1:
+                    return np.log(args[0])
+                return np.log(args[0]) / np.log(args[1])
+            if len(args) == 1:
+                return math.log(args[0])
+            return math.log(args[0], args[1])
+        elif func_name == 'sqrt':
+            if hasattr(args[0], '__iter__'):
+                return np.sqrt(args[0])
+            return math.sqrt(args[0])
+        elif func_name == 'root':
+            if len(args) < 2:
+                raise ValueError("root() 需要两个参数：root(值, n次方)")
+            if hasattr(args[0], '__iter__'):
+                return np.power(args[0], 1.0 / args[1])
+            return args[0] ** (1.0 / args[1])
+
     # 常量：数字字面量
     if isinstance(node, ast.Constant):
         if isinstance(node.value, (int, float)):
@@ -87,7 +130,7 @@ def _eval_ast_node(
         if op_type not in _BINOP_MAP:
             raise ValueError(
                 f"不支持的运算符：{type(node.op).__name__}，"
-                f"仅支持 +、-、*、/ 四则运算。"
+                f"仅支持 +、-、*、/、**、^ 运算。"
             )
 
         left = _eval_ast_node(node.left, df, errors, collected_cols)
@@ -192,6 +235,9 @@ def _eval_ast_node(
 
             return result
 
+        elif isinstance(node.op, (ast.Pow, ast.BitXor)):
+            return left ** right
+
         return result
 
     # 一元运算（正号 / 负号）
@@ -214,7 +260,7 @@ def _eval_ast_node(
     # 不允许的节点类型
     raise ValueError(
         f"不支持的表达式元素：{type(node).__name__}。"
-        f"仅支持列名、数字常量和 +、-、*、/ 四则运算。"
+        f"仅支持列名、数字常量、+、-、*、/、**、^ 运算以及 abs()、log()、sqrt()、root() 函数。"
     )
 
 
@@ -259,6 +305,46 @@ def _decompose_ast(
     KeyError
         引用的列名不存在。
     """
+    # 函数调用
+    if isinstance(node, ast.Call):
+        if not isinstance(node.func, ast.Name):
+            raise ValueError(
+                f"仅支持简单函数调用（如 abs(B)），不支持 {type(node.func).__name__}"
+            )
+        func_name = node.func.id
+        allowed_funcs = {'abs', 'log', 'sqrt', 'root'}
+        if func_name not in allowed_funcs:
+            raise ValueError(
+                f"不支持的函数 '{func_name}'。支持的函数：{', '.join(sorted(allowed_funcs))}"
+            )
+
+        # 递归处理参数
+        arg_results = []
+        for arg in node.args:
+            arg_result = _decompose_ast(
+                arg, df, errors, collected_cols, tmp_counter, steps
+            )
+            arg_results.append(arg_result)
+
+        tmp_counter[0] += 1
+        tmp_col = f"__calc_tmp_{tmp_counter[0]}"
+        arg_str = ', '.join(str(a) for a in arg_results)
+        expr_str = f"{tmp_col} = {func_name}({arg_str})"
+
+        if func_name == 'abs':
+            calc_abs(df, expr_str, rounding=15, format=None, errors=errors)
+        elif func_name == 'log':
+            calc_log(df, expr_str, rounding=15, format=None, errors=errors)
+        elif func_name == 'sqrt':
+            calc_sqrt(df, expr_str, rounding=15, format=None, errors=errors)
+        elif func_name == 'root':
+            calc_root(df, expr_str, rounding=15, format=None, errors=errors)
+
+        steps.append(
+            CalcStep(expression=expr_str, result_col=tmp_col, operator=func_name)
+        )
+        return tmp_col
+
     # 常量：数字字面量 → 返回标量值
     if isinstance(node, ast.Constant):
         if isinstance(node.value, (int, float)):
@@ -284,7 +370,7 @@ def _decompose_ast(
         if op_type not in _BINOP_MAP:
             raise ValueError(
                 f"不支持的运算符：{type(node.op).__name__}，"
-                f"仅支持 +、-、*、/ 四则运算。"
+                f"仅支持 +、-、*、/、**、^ 运算。"
             )
         op_symbol = _BINOP_MAP[op_type]
 
@@ -307,6 +393,10 @@ def _decompose_ast(
                 if right_ref == 0:
                     return float('nan') if left_ref == 0 else 0
                 return left_ref / right_ref
+            elif op_symbol in ('**', '^'):
+                if left_ref == 0 and right_ref == 0:
+                    return float('nan')
+                return left_ref ** right_ref
 
         # 标量操作数 → 先添加为临时列
         if not isinstance(left_ref, str):
@@ -335,6 +425,8 @@ def _decompose_ast(
             calc_mul(df, expr_str, rounding=15, format=None, errors=errors)
         elif op_symbol == '/':
             calc_div(df, expr_str, rounding=15, format=None, errors=errors)
+        elif op_symbol in ('**', '^'):
+            calc_pow(df, expr_str, rounding=15, format=None, errors=errors)
 
         steps.append(
             CalcStep(expression=expr_str, result_col=tmp_col, operator=op_symbol)
@@ -382,5 +474,5 @@ def _decompose_ast(
     # 不允许的节点类型
     raise ValueError(
         f"不支持的表达式元素：{type(node).__name__}。"
-        f"仅支持列名、数字常量和 +、-、*、/ 四则运算。"
+        f"仅支持列名、数字常量、+、-、*、/、**、^ 运算以及 abs()、log()、sqrt()、root() 函数。"
     )

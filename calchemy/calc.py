@@ -11,6 +11,7 @@ import pandas as pd
 from calchemy.types import CalcResult, CalcStep
 from calchemy.utils import _parse_format_suffix, _validate_errors, _apply_format
 from calchemy.parse import _decompose_ast
+from calchemy.helpers import calc_add, calc_sub, calc_mul, calc_div, calc_pow, calc_abs, calc_log, calc_sqrt, calc_root
 
 
 # ──────────────────────────────────────────────
@@ -78,7 +79,7 @@ def _calc_decompose(
     except SyntaxError as e:
         raise ValueError(
             f"表达式语法错误：'{calc_expr}'，原因：{e.msg}。"
-            f"仅支持列名、数字常量和 +、-、*、/ 四则运算。"
+            f"仅支持列名、数字常量、+、-、*、/、**、^ 运算以及 abs()、log()、sqrt()、root() 函数。"
         )
 
     root = tree.body
@@ -141,8 +142,8 @@ def calc(
            "gm_rate = (revenue - cogs) / revenue"
         3) 带格式后缀：
            "gm_rate = (revenue - cogs) / revenue >>> %"
-        空格可随意添加。运算符支持 +、-、*、/，支持括号改变优先级。
-        操作数可以是列名或数字常量。
+        空格可随意添加。运算符支持 +、-、*、/、**、^，支持括号改变优先级。
+        操作数可以是列名或数字常量。支持 abs()、log()、sqrt()、root() 函数。
     rounding : int, default 2
         保留的小数位数（百分比模式下同样适用）。
     format : str, optional
@@ -167,7 +168,7 @@ def calc(
       分母=0 且分子=0 → NaN；分母=0 且分子≠0 → 强制 0。
     - 加减乘的 NaN 处理：任一操作数为 NaN → 结果 NaN。
     - 安全性：使用 ast.parse 的受限子集解析表达式，**禁止 eval()**，
-      不允许函数调用、属性访问、下标等操作。
+      仅允许 abs()、log()、sqrt()、root() 函数，禁止属性访问、下标等操作。
 
     Examples
     --------

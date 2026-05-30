@@ -4,6 +4,8 @@ Calchemy — A declarative DSL for DataFrame column calculations.
 Every DataFrame has gold in it. Calchemy helps you extract it.
 """
 
+import re
+
 import pandas as pd
 import numpy as np
 
@@ -466,4 +468,588 @@ def calc_mul(
     # 6. 格式化输出
     _apply_format(df, 新列名, format, rounding, is_multi_index)
 
+    return df
+
+
+def calc_pow(df, expr, rounding=2, format=None, errors='coerce'):
+    """指数运算。
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        数据源。
+    expr : str
+        表达式，格式：``"A = B ** C"`` 或 ``"A = B ^ C"``。
+    rounding : int, default 2
+        结果保留小数位数。
+    format : str, optional
+        输出格式后缀。
+    errors : {'coerce', 'raise', 'ignore'}, default 'coerce'
+        异常处理模式。
+
+    Returns
+    -------
+    pd.DataFrame
+        修改后的 DataFrame（增加了新列）。
+    """
+    new_col, format_suffix = _parse_format_suffix(expr)
+    format = format or format_suffix
+
+    calc_expr = expr.split('=', 1)[1].strip()
+    # 尝试匹配 ** 或 ^
+    if '**' in calc_expr:
+        parts = calc_expr.split('**')
+        op = '**'
+    elif '^' in calc_expr:
+        parts = calc_expr.split('^')
+        op = '^'
+    else:
+        raise ValueError(f"表达式 '{expr}' 中未找到指数运算符 ** 或 ^")
+
+    left = parts[0].strip()
+    right = parts[1].strip()
+
+    _validate_errors(errors)
+    cols = [c for c in [left, right] if c in df.columns]
+    _validate_columns(df, *cols)
+
+    # 解析操作数
+    def _get_operand(val):
+        if val in df.columns:
+            return df[val]
+        try:
+            return float(val)
+        except ValueError:
+            raise ValueError(f"无法解析操作数 '{val}'")
+
+    left_op = _get_operand(left)
+    right_op = _get_operand(right)
+
+    # 计算
+    if errors == 'raise':
+        for col_name, col_data in [(left, left_op), (right, right_op)]:
+            if hasattr(col_data, 'isna') and col_data.isna().any():
+                nan_idx = col_data[col_data.isna()].index.tolist()
+                raise ValueError(
+                    f"calc_pow: 列 '{col_name}' 包含 NaN，行索引: {nan_idx}"
+                )
+
+    # 0**0 → NaN
+    if hasattr(left_op, '__iter__') and hasattr(right_op, '__iter__'):
+        result = np.power(left_op, right_op)
+        result[(left_op == 0) & (right_op == 0)] = np.nan
+    elif hasattr(left_op, '__iter__'):
+        result = np.power(left_op, right_op)
+        if right_op == 0:
+            result[left_op == 0] = np.nan
+    elif hasattr(right_op, '__iter__'):
+        result = np.power(left_op, right_op)
+        if left_op == 0:
+            result[right_op == 0] = np.nan
+    else:
+        if left_op == 0 and right_op == 0:
+            result = np.nan
+        else:
+            result = left_op ** right_op
+
+    is_multi_index = isinstance(df.index, pd.MultiIndex)
+    if is_multi_index:
+        df[new_col] = result
+    else:
+        df.loc[:, new_col] = result
+
+    if format:
+        _apply_format(df, new_col, format)
+    else:
+        df[new_col] = df[new_col].round(rounding)
+
+    return df
+
+
+def calc_abs(df, expr, rounding=2, format=None, errors='coerce'):
+    """绝对值运算。
+
+    expr 格式: ``"A = abs(B)"``
+    """
+    new_col, format_suffix = _parse_format_suffix(expr)
+    format = format or format_suffix
+
+    calc_expr = expr.split('=', 1)[1].strip()
+    # 提取括号内的内容
+    match = re.match(r'abs\s*\(\s*(\w+)\s*\)', calc_expr)
+    if not match:
+        raise ValueError(f"calc_abs: 表达式格式错误，期望 'A = abs(B)'，收到: '{expr}'")
+    source_col = match.group(1)
+
+    _validate_errors(errors)
+    _validate_columns(df, source_col)
+
+    if errors == 'raise' and df[source_col].isna().any():
+        nan_idx = df[source_col][df[source_col].isna()].index.tolist()
+        raise ValueError(f"calc_abs: 列 '{source_col}' 包含 NaN，行索引: {nan_idx}")
+
+    result = df[source_col].abs()
+
+    is_multi_index = isinstance(df.index, pd.MultiIndex)
+    if is_multi_index:
+        df[new_col] = result
+    else:
+        df.loc[:, new_col] = result
+
+    if format:
+        _apply_format(df, new_col, format)
+    else:
+        df[new_col] = df[new_col].round(rounding)
+
+    return df
+
+
+def calc_log(df, expr, rounding=2, format=None, errors='coerce'):
+    """对数运算。
+
+    expr 格式: ``"A = log(B)"``（自然对数）或 ``"A = log(B, 10)"``（指定底数）
+    """
+    new_col, format_suffix = _parse_format_suffix(expr)
+    format = format or format_suffix
+
+    calc_expr = expr.split('=', 1)[1].strip()
+    match = re.match(r'log\s*\(\s*(\w+)\s*(?:,\s*(\S+)\s*)?\)', calc_expr)
+    if not match:
+        raise ValueError(f"calc_log: 表达式格式错误，期望 'A = log(B)' 或 'A = log(B, base)'，收到: '{expr}'")
+    source_col = match.group(1)
+    base_str = match.group(2)
+
+    _validate_errors(errors)
+    _validate_columns(df, source_col)
+
+    if errors == 'raise' and df[source_col].isna().any():
+        nan_idx = df[source_col][df[source_col].isna()].index.tolist()
+        raise ValueError(f"calc_log: 列 '{source_col}' 包含 NaN，行索引: {nan_idx}")
+
+    # 检查非正数
+    if errors == 'raise':
+        if (df[source_col] <= 0).any():
+            bad_idx = df[source_col][df[source_col] <= 0].index.tolist()
+            raise ValueError(f"calc_log: 列 '{source_col}' 包含非正值（log 定义域要求 > 0），行索引: {bad_idx}")
+
+    if base_str:
+        base = float(base_str)
+        result = np.log(df[source_col]) / np.log(base)
+    else:
+        result = np.log(df[source_col])
+
+    is_multi_index = isinstance(df.index, pd.MultiIndex)
+    if is_multi_index:
+        df[new_col] = result
+    else:
+        df.loc[:, new_col] = result
+
+    if format:
+        _apply_format(df, new_col, format)
+    else:
+        df[new_col] = df[new_col].round(rounding)
+
+    return df
+
+
+def calc_sqrt(df, expr, rounding=2, format=None, errors='coerce'):
+    """平方根运算。
+
+    expr 格式: ``"A = sqrt(B)"``
+    """
+    new_col, format_suffix = _parse_format_suffix(expr)
+    format = format or format_suffix
+
+    calc_expr = expr.split('=', 1)[1].strip()
+    match = re.match(r'sqrt\s*\(\s*(\w+)\s*\)', calc_expr)
+    if not match:
+        raise ValueError(f"calc_sqrt: 表达式格式错误，期望 'A = sqrt(B)'，收到: '{expr}'")
+    source_col = match.group(1)
+
+    _validate_errors(errors)
+    _validate_columns(df, source_col)
+
+    if errors == 'raise' and df[source_col].isna().any():
+        nan_idx = df[source_col][df[source_col].isna()].index.tolist()
+        raise ValueError(f"calc_sqrt: 列 '{source_col}' 包含 NaN，行索引: {nan_idx}")
+
+    if errors == 'raise' and (df[source_col] < 0).any():
+        bad_idx = df[source_col][df[source_col] < 0].index.tolist()
+        raise ValueError(f"calc_sqrt: 列 '{source_col}' 包含负数，行索引: {bad_idx}")
+
+    result = np.sqrt(df[source_col])
+
+    is_multi_index = isinstance(df.index, pd.MultiIndex)
+    if is_multi_index:
+        df[new_col] = result
+    else:
+        df.loc[:, new_col] = result
+
+    if format:
+        _apply_format(df, new_col, format)
+    else:
+        df[new_col] = df[new_col].round(rounding)
+
+    return df
+
+
+def calc_root(df, expr, rounding=2, format=None, errors='coerce'):
+    """n 次方根运算。
+
+    expr 格式: ``"A = root(B, 3)"``
+    """
+    new_col, format_suffix = _parse_format_suffix(expr)
+    format = format or format_suffix
+
+    calc_expr = expr.split('=', 1)[1].strip()
+    match = re.match(r'root\s*\(\s*(\w+)\s*,\s*(\S+)\s*\)', calc_expr)
+    if not match:
+        raise ValueError(f"calc_root: 表达式格式错误，期望 'A = root(B, n)'，收到: '{expr}'")
+    source_col = match.group(1)
+    n_str = match.group(2)
+
+    _validate_errors(errors)
+    _validate_columns(df, source_col)
+
+    n = float(n_str)
+
+    if errors == 'raise' and df[source_col].isna().any():
+        nan_idx = df[source_col][df[source_col].isna()].index.tolist()
+        raise ValueError(f"calc_root: 列 '{source_col}' 包含 NaN，行索引: {nan_idx}")
+
+    result = np.power(df[source_col], 1.0 / n)
+
+    is_multi_index = isinstance(df.index, pd.MultiIndex)
+    if is_multi_index:
+        df[new_col] = result
+    else:
+        df.loc[:, new_col] = result
+
+    if format:
+        _apply_format(df, new_col, format)
+    else:
+        df[new_col] = df[new_col].round(rounding)
+
+    return df
+
+
+# ──────────────────────────────────────────────
+# 扩展运算符（Phase 4.5）
+# ──────────────────────────────────────────────
+
+def calc_pow(
+    df: pd.DataFrame,
+    expr: str,
+    rounding: int = 2,
+    format: str | None = None,
+    errors: str = 'coerce',
+) -> pd.DataFrame:
+    """指数运算。
+
+    支持 ``**``（Python 风格）和 ``^``（Excel 风格）两种写法，
+    底层统一为 ``np.power`` 向量化计算。
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        数据源。
+    expr : str
+        表达式，如 ``"A = B ** 2"`` 或 ``"A = B ^ C"``。
+    rounding : int, default 2
+        保留小数位数。
+    format : str, optional
+        输出格式。
+    errors : {'coerce', 'raise', 'ignore'}, default 'coerce'
+        异常处理模式。
+
+    Returns
+    -------
+    pd.DataFrame
+        修改后的 DataFrame。
+    """
+    expr, format = _parse_format_suffix(expr, format)
+    _validate_errors(errors)
+
+    if expr.count('=') != 1:
+        raise ValueError(f"格式错误，期望 'new = base ** exp'，收到：'{expr}'")
+
+    新列名 = expr.split('=')[0].strip()
+    计算部分 = expr.split('=')[1].strip()
+
+    # 尝试匹配 ** 或 ^
+    if '**' in 计算部分:
+        操作数列表 = 计算部分.split('**')
+        op = '**'
+    elif '^' in 计算部分:
+        操作数列表 = 计算部分.split('^')
+        op = '^'
+    else:
+        raise ValueError(f"表达式 '{expr}' 中未找到指数运算符 ** 或 ^")
+
+    if len(操作数列表) != 2:
+        raise ValueError(f"格式错误，期望 'base {op} exp'，收到：'{计算部分}'")
+
+    底数 = 操作数列表[0].strip()
+    指数 = 操作数列表[1].strip()
+
+    cols = [c for c in [底数, 指数] if c in df.columns]
+    _validate_columns(df, *cols)
+
+    # 解析操作数
+    def _get_operand(val):
+        if val in df.columns:
+            return df[val]
+        try:
+            return float(val)
+        except ValueError:
+            raise ValueError(f"无法解析操作数 '{val}'")
+
+    底数值 = _get_operand(底数)
+    指数值 = _get_operand(指数)
+
+    is_multi_index = isinstance(df.index, pd.MultiIndex)
+
+    # raise 模式检查 NaN
+    if errors == 'raise':
+        for name, data in [(底数, 底数值), (指数, 指数值)]:
+            if hasattr(data, 'isna') and data.isna().any():
+                problem_rows = df.index[data.isna()]
+                raise ValueError(
+                    f"calc_pow: 列 '{name}' 在以下行存在 NaN 数据"
+                    f"（索引）：{problem_rows.tolist()[:10]}..."
+                )
+
+    # 计算
+    if hasattr(底数值, '__iter__') and hasattr(指数值, '__iter__'):
+        result = np.power(底数值, 指数值)
+        result[(底数值 == 0) & (指数值 == 0)] = np.nan
+    elif hasattr(底数值, '__iter__'):
+        result = np.power(底数值, 指数值)
+        if 指数值 == 0:
+            result[底数值 == 0] = np.nan
+    elif hasattr(指数值, '__iter__'):
+        result = np.power(底数值, 指数值)
+        if 底数值 == 0:
+            result[指数值 == 0] = np.nan
+    else:
+        if 底数值 == 0 and 指数值 == 0:
+            result = np.nan
+        else:
+            result = 底数值 ** 指数值
+
+    if is_multi_index:
+        df[新列名] = result
+    else:
+        df.loc[:, 新列名] = result
+
+    _apply_format(df, 新列名, format, rounding, is_multi_index)
+    return df
+
+
+def calc_abs(
+    df: pd.DataFrame,
+    expr: str,
+    rounding: int = 2,
+    format: str | None = None,
+    errors: str = 'coerce',
+) -> pd.DataFrame:
+    """绝对值运算。
+
+    expr 格式: ``"A = abs(B)"``
+    """
+    expr, format = _parse_format_suffix(expr, format)
+    _validate_errors(errors)
+
+    if expr.count('=') != 1:
+        raise ValueError(f"格式错误，期望 'new = abs(col)'，收到：'{expr}'")
+
+    新列名 = expr.split('=')[0].strip()
+    计算部分 = expr.split('=')[1].strip()
+
+    match = re.match(r'abs\s*\(\s*(\w+)\s*\)', 计算部分)
+    if not match:
+        raise ValueError(f"calc_abs: 表达式格式错误，期望 'A = abs(B)'，收到: '{expr}'")
+    源列 = match.group(1)
+
+    _validate_columns(df, 源列)
+
+    is_multi_index = isinstance(df.index, pd.MultiIndex)
+
+    if errors == 'raise' and df[源列].isna().any():
+        problem_rows = df.index[df[源列].isna()]
+        raise ValueError(
+            f"calc_abs: 列 '{源列}' 在以下行存在 NaN 数据"
+            f"（索引）：{problem_rows.tolist()[:10]}..."
+        )
+
+    result = df[源列].abs()
+
+    if is_multi_index:
+        df[新列名] = result
+    else:
+        df.loc[:, 新列名] = result
+
+    _apply_format(df, 新列名, format, rounding, is_multi_index)
+    return df
+
+
+def calc_log(
+    df: pd.DataFrame,
+    expr: str,
+    rounding: int = 2,
+    format: str | None = None,
+    errors: str = 'coerce',
+) -> pd.DataFrame:
+    """对数运算。
+
+    expr 格式: ``"A = log(B)"``（自然对数）或 ``"A = log(B, 10)"``（指定底数）
+    """
+    expr, format = _parse_format_suffix(expr, format)
+    _validate_errors(errors)
+
+    if expr.count('=') != 1:
+        raise ValueError(f"格式错误，期望 'new = log(col)' 或 'new = log(col, base)'，收到：'{expr}'")
+
+    新列名 = expr.split('=')[0].strip()
+    计算部分 = expr.split('=')[1].strip()
+
+    match = re.match(r'log\s*\(\s*(\w+)\s*(?:,\s*(\S+)\s*)?\)', 计算部分)
+    if not match:
+        raise ValueError(f"calc_log: 表达式格式错误，期望 'A = log(B)' 或 'A = log(B, base)'，收到: '{expr}'")
+    源列 = match.group(1)
+    底数字符串 = match.group(2)
+
+    _validate_columns(df, 源列)
+
+    is_multi_index = isinstance(df.index, pd.MultiIndex)
+
+    if errors == 'raise' and df[源列].isna().any():
+        problem_rows = df.index[df[源列].isna()]
+        raise ValueError(
+            f"calc_log: 列 '{源列}' 在以下行存在 NaN 数据"
+            f"（索引）：{problem_rows.tolist()[:10]}..."
+        )
+
+    if errors == 'raise' and (df[源列] <= 0).any():
+        bad_rows = df.index[df[源列] <= 0]
+        raise ValueError(
+            f"calc_log: 列 '{源列}' 包含非正值（log 定义域要求 > 0），"
+            f"行索引: {bad_rows.tolist()[:10]}..."
+        )
+
+    if 底数字符串:
+        底数 = float(底数字符串)
+        result = np.log(df[源列]) / np.log(底数)
+    else:
+        result = np.log(df[源列])
+
+    if is_multi_index:
+        df[新列名] = result
+    else:
+        df.loc[:, 新列名] = result
+
+    _apply_format(df, 新列名, format, rounding, is_multi_index)
+    return df
+
+
+def calc_sqrt(
+    df: pd.DataFrame,
+    expr: str,
+    rounding: int = 2,
+    format: str | None = None,
+    errors: str = 'coerce',
+) -> pd.DataFrame:
+    """平方根运算。
+
+    expr 格式: ``"A = sqrt(B)"``
+    """
+    expr, format = _parse_format_suffix(expr, format)
+    _validate_errors(errors)
+
+    if expr.count('=') != 1:
+        raise ValueError(f"格式错误，期望 'new = sqrt(col)'，收到：'{expr}'")
+
+    新列名 = expr.split('=')[0].strip()
+    计算部分 = expr.split('=')[1].strip()
+
+    match = re.match(r'sqrt\s*\(\s*(\w+)\s*\)', 计算部分)
+    if not match:
+        raise ValueError(f"calc_sqrt: 表达式格式错误，期望 'A = sqrt(B)'，收到: '{expr}'")
+    源列 = match.group(1)
+
+    _validate_columns(df, 源列)
+
+    is_multi_index = isinstance(df.index, pd.MultiIndex)
+
+    if errors == 'raise' and df[源列].isna().any():
+        problem_rows = df.index[df[源列].isna()]
+        raise ValueError(
+            f"calc_sqrt: 列 '{源列}' 在以下行存在 NaN 数据"
+            f"（索引）：{problem_rows.tolist()[:10]}..."
+        )
+
+    if errors == 'raise' and (df[源列] < 0).any():
+        bad_rows = df.index[df[源列] < 0]
+        raise ValueError(
+            f"calc_sqrt: 列 '{源列}' 包含负数，行索引: {bad_rows.tolist()[:10]}..."
+        )
+
+    result = np.sqrt(df[源列])
+
+    if is_multi_index:
+        df[新列名] = result
+    else:
+        df.loc[:, 新列名] = result
+
+    _apply_format(df, 新列名, format, rounding, is_multi_index)
+    return df
+
+
+def calc_root(
+    df: pd.DataFrame,
+    expr: str,
+    rounding: int = 2,
+    format: str | None = None,
+    errors: str = 'coerce',
+) -> pd.DataFrame:
+    """n 次方根运算。
+
+    expr 格式: ``"A = root(B, 3)"``
+    """
+    expr, format = _parse_format_suffix(expr, format)
+    _validate_errors(errors)
+
+    if expr.count('=') != 1:
+        raise ValueError(f"格式错误，期望 'new = root(col, n)'，收到：'{expr}'")
+
+    新列名 = expr.split('=')[0].strip()
+    计算部分 = expr.split('=')[1].strip()
+
+    match = re.match(r'root\s*\(\s*(\w+)\s*,\s*(\S+)\s*\)', 计算部分)
+    if not match:
+        raise ValueError(f"calc_root: 表达式格式错误，期望 'A = root(B, n)'，收到: '{expr}'")
+    源列 = match.group(1)
+    n字符串 = match.group(2)
+
+    _validate_columns(df, 源列)
+
+    n = float(n字符串)
+
+    is_multi_index = isinstance(df.index, pd.MultiIndex)
+
+    if errors == 'raise' and df[源列].isna().any():
+        problem_rows = df.index[df[源列].isna()]
+        raise ValueError(
+            f"calc_root: 列 '{源列}' 在以下行存在 NaN 数据"
+            f"（索引）：{problem_rows.tolist()[:10]}..."
+        )
+
+    result = np.power(df[源列], 1.0 / n)
+
+    if is_multi_index:
+        df[新列名] = result
+    else:
+        df.loc[:, 新列名] = result
+
+    _apply_format(df, 新列名, format, rounding, is_multi_index)
     return df
