@@ -28,24 +28,66 @@ Traditional pandas code is unreadable to business users and error-prone for LLMs
 
 ### Side-by-Side Comparison
 
-**❌ Traditional pandas — unreadable to business users**
+Calchemy's advantage grows **exponentially with complexity** — the more complex the formula, the more dramatic the gap.
+
+---
+
+#### Level 1: Simple addition/subtraction — pandas is still okay
+
+**Scenario**: Calculate gross profit
 
 ```python
-df["gm_rate"] = (
-    df["revenue"] - df["cogs"]
-) / df["revenue"]
-df["gm_rate"] = df["gm_rate"].apply(
-    lambda x: f"{x:.2%}" if pd.notna(x) else x
-)
+# pandas — barely readable, but df["..."] is already noise
+df["gross_profit"] = df["revenue"] - df["cogs"]
+
+# Calchemy — removes the noise, reads like business language
+calc(df, "gross_profit = revenue - cogs")
 ```
 
-**✅ Calchemy — readable by anyone**
+> The gap is small, but Calchemy is cleaner.
+
+---
+
+#### Level 2: Division + formatting — pandas starts to struggle
+
+**Scenario**: Calculate gross margin and display as percentage
 
 ```python
+# pandas — 1 line becomes 2, lambda and apply appear
+df["gm_rate"] = (df["revenue"] - df["cogs"]) / df["revenue"]
+df["gm_rate"] = df["gm_rate"].apply(lambda x: f"{x:.2%}" if pd.notna(x) else x)
+
+# Calchemy — one line, format is a suffix, instantly readable
 calc(df, "gm_rate = (revenue - cogs) / revenue >>> %")
 ```
 
-> Business users don't need to understand `df["..."]` or `apply(lambda x: ...)`. **Calchemy expressions are business language** — `gm_rate = (revenue - cogs) / revenue` is instantly readable and verifiable.
+> pandas exposes "technical detail noise"; business users start to get confused. **Calchemy still reads like a formula.**
+
+---
+
+#### Level 3: Composite metric — pandas becomes gibberish
+
+**Scenario**: Calculate **composite health score** (DAU × retention - CAC) / revenue
+
+```python
+# pandas — column names repeated 6× with df["..."], business users are lost
+df["health"] = (df["DAU"] * df["retention"] - df["CAC"]) / df["revenue"]
+df["health"] = df["health"].apply(lambda x: f"{x:.2%}" if pd.notna(x) else x)
+
+# Calchemy — no matter how complex, always one line of natural language
+calc(df, "health = (DAU * retention - CAC) / revenue >>> %")
+```
+
+> **pandas' `df["..."]` grows linearly with column count** — 5 fields produce 6 repetitions of noise; **Calchemy maintains constant natural-language density**, always one line of business formula.
+
+---
+
+#### Key insight
+
+```
+pandas readability ≈ formula complexity × df["..."] repetition count
+Calchemy readability = formula complexity (constant, always one line)
+```
 
 ### Common Business Scenarios
 
