@@ -16,7 +16,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/python-3.10+-blue" alt="Python 3.10+">
-  <img src="https://img.shields.io/badge/tests-124%20passing-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-180%20passing-brightgreen" alt="Tests">
   <a href="https://github.com/CoderMoray/Calchemy/actions/workflows/ci.yml">
     <img src="https://github.com/CoderMoray/Calchemy/actions/workflows/ci.yml/badge.svg" alt="CI">
   </a>
@@ -260,7 +260,7 @@ calchemy/
 │   └── chain.py            # Chain-style API
 ├── tests/                  # Test directory
 │   ├── __init__.py
-│   └── test_calchemy.py   # Test suite (124 cases)
+│   └── test_calchemy.py   # Test suite (180 cases)
 ├── README.md               # Chinese documentation
 ├── README_EN.md            # English documentation (this file)
 └── .gitignore
@@ -278,7 +278,7 @@ calchemy/
 | Phase 3 | Compound expression engine `calc()` (parentheses + constants) | ✅ Done |
 | Phase 3.5 | Decompose engine `_calc_decompose()`: step-by-step execution + lineage tracking | ✅ Done |
 | Phase 4 | Chain-style API: `Calchemy` class | ✅ Done (111 tests) |
-| Phase 4.5 | Extended operators (exponent `**`/`^`, logarithm `log`, absolute `abs`, square root `sqrt`, n-th root `root`) | ✅ Done (124 tests) |
+| Phase 4.5 | Extended operators (exponent `**`/`^`, logarithm `log`, absolute `abs`, square root `sqrt`, n-th root `root`) | ✅ Done (180 tests, 99% coverage) |
 | Phase 5 | LLM Function Calling schema + Skill docs | 🔲 Planned |
 | Phase 6 | Multi-backend support (polars / SQL) | 🔲 Planned |
 | Phase 7 | Metric registry + lineage graph | 🔲 Planned |

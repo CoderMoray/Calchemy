@@ -16,7 +16,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/python-3.10+-blue" alt="Python 3.10+">
-  <img src="https://img.shields.io/badge/tests-124%20passing-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-180%20passing-brightgreen" alt="Tests">
   <a href="https://github.com/CoderMoray/Calchemy/actions/workflows/ci.yml">
     <img src="https://github.com/CoderMoray/Calchemy/actions/workflows/ci.yml/badge.svg" alt="CI">
   </a>
@@ -260,7 +260,7 @@ calchemy/
 │   └── chain.py            # 链式调用 API
 ├── tests/                  # 测试目录
 │   ├── __init__.py
-│   └── test_calchemy.py   # 测试套件（124 用例）
+│   └── test_calchemy.py   # 测试套件（180 用例）
 ├── README.md               # 中文文档（本文件）
 ├── README_EN.md            # English documentation
 └── .gitignore
@@ -278,7 +278,7 @@ calchemy/
 | Phase 3 | 混合运算引擎 `calc()`（括号 + 常量） | ✅ 完成 |
 | Phase 3.5 | 拆解引擎 `_calc_decompose()`：逐步执行 + 血缘追踪 | ✅ 完成 |
 | Phase 4 | 链式调用 `Calchemy` 类 | ✅ 完成（111 测试通过） |
-| Phase 4.5 | 扩展运算符（指数 `**`/`^`、对数 `log`、绝对值 `abs`、平方根 `sqrt`、n次方根 `root`） | ✅ 完成（124 测试通过） |
+| Phase 4.5 | 扩展运算符（指数 `**`/`^`、对数 `log`、绝对值 `abs`、平方根 `sqrt`、n次方根 `root`） | ✅ 完成（180 测试通过，99% 覆盖率） |
 | Phase 5 | LLM Function Calling schema + Skill 文档 | 🔲 规划中 |
 | Phase 6 | 跨后端适配（polars / SQL） | 🔲 规划中 |
 | Phase 7 | 指标注册表 + 血缘图谱 | 🔲 规划中 |
