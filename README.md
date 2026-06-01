@@ -20,6 +20,9 @@
   <a href="https://github.com/CoderMoray/Calchemy/actions/workflows/ci.yml">
     <img src="https://github.com/CoderMoray/Calchemy/actions/workflows/ci.yml/badge.svg" alt="CI">
   </a>
+  <a href="https://codecov.io/gh/CoderMoray/Calchemy">
+    <img src="https://codecov.io/gh/CoderMoray/Calchemy/branch/main/graph/badge.svg" alt="codecov">
+  </a>
   <img src="https://img.shields.io/badge/license-Apache%202.0-green" alt="License">
 </p>
 
