@@ -1062,3 +1062,389 @@ class TestExtendedOperators:
         df = pd.DataFrame({"B": [2, 3], "C": [1, 2]})
         result = calc(df, "A = B ** 2 + C")
         assert result["A"].tolist() == [5.0, 11.0]
+
+    def test_pow_raise_nan(self):
+        """calc_pow errors='raise' 时 NaN 抛异常。"""
+        df = pd.DataFrame({"B": [2.0, np.nan], "C": [3.0, 3.0]})
+        with pytest.raises(ValueError, match="calc_pow"):
+            calc_pow(df, "A = B ** C", errors='raise')
+
+    def test_pow_format_percent(self):
+        """calc_pow 支持百分比格式。"""
+        df = pd.DataFrame({"B": [2.0, 3.0]})
+        result = calc_pow(df, "A = B ** 2 >>> %")
+        assert result["A"].iloc[0] == "400.00%"
+
+    def test_pow_multiindex(self):
+        """calc_pow 支持 MultiIndex。"""
+        df = pd.DataFrame(
+            {"B": [2.0, 3.0], "C": [3.0, 2.0]},
+            index=pd.MultiIndex.from_tuples([(1, 'a'), (1, 'b')])
+        )
+        result = calc_pow(df, "A = B ** C")
+        assert result["A"].tolist() == [8.0, 9.0]
+
+    def test_pow_scalar_scalar(self):
+        """calc_pow 双方都是标量（如 2 ** 3）。"""
+        df = pd.DataFrame({"X": [1.0]})
+        result = calc_pow(df, "A = 2 ** 3")
+        assert result["A"].iloc[0] == 8.0
+
+    def test_pow_scalar_series(self):
+        """calc_pow 左标量右 Series（如 2 ** B）。"""
+        df = pd.DataFrame({"B": [2.0, 3.0]})
+        result = calc_pow(df, "A = 2 ** B")
+        assert result["A"].tolist() == [4.0, 8.0]
+
+    def test_pow_series_scalar(self):
+        """calc_pow 左 Series 右标量（如 B ** 2）。"""
+        df = pd.DataFrame({"B": [2.0, 3.0]})
+        result = calc_pow(df, "A = B ** 2")
+        assert result["A"].tolist() == [4.0, 9.0]
+
+    def test_pow_invalid_expr(self):
+        """calc_pow 表达式格式错误抛异常。"""
+        df = pd.DataFrame({"B": [2.0]})
+        with pytest.raises(ValueError):
+            calc_pow(df, "A B ** 2")
+        with pytest.raises(ValueError):
+            calc_pow(df, "A = B + 2")
+
+    def test_abs_raise_nan(self):
+        """calc_abs errors='raise' 时 NaN 抛异常。"""
+        df = pd.DataFrame({"B": [-5.0, np.nan]})
+        with pytest.raises(ValueError, match="calc_abs"):
+            calc_abs(df, "A = abs(B)", errors='raise')
+
+    def test_abs_format(self):
+        """calc_abs 支持格式。"""
+        df = pd.DataFrame({"B": [-0.5, 0.3]})
+        result = calc_abs(df, "A = abs(B) >>> %")
+        assert result["A"].iloc[0] == "50.00%"
+
+    def test_abs_multiindex(self):
+        """calc_abs 支持 MultiIndex。"""
+        df = pd.DataFrame(
+            {"B": [-5.0, 3.0]},
+            index=pd.MultiIndex.from_tuples([(1, 'a'), (1, 'b')])
+        )
+        result = calc_abs(df, "A = abs(B)")
+        assert result["A"].tolist() == [5.0, 3.0]
+
+    def test_abs_invalid_expr(self):
+        """calc_abs 表达式格式错误抛异常。"""
+        df = pd.DataFrame({"B": [2.0]})
+        with pytest.raises(ValueError):
+            calc_abs(df, "A = abs B")
+
+    def test_log_raise_nan(self):
+        """calc_log errors='raise' 时 NaN 抛异常。"""
+        df = pd.DataFrame({"B": [1.0, np.nan]})
+        with pytest.raises(ValueError, match="calc_log"):
+            calc_log(df, "A = log(B)", errors='raise')
+
+    def test_log_raise_nonpositive(self):
+        """calc_log errors='raise' 时非正值抛异常。"""
+        df = pd.DataFrame({"B": [1.0, 0.0]})
+        with pytest.raises(ValueError, match="定义域"):
+            calc_log(df, "A = log(B)", errors='raise')
+
+    def test_log_format(self):
+        """calc_log 支持格式。"""
+        df = pd.DataFrame({"B": [np.e, np.e ** 2]})
+        result = calc_log(df, "A = log(B) >>> %")
+        assert result["A"].iloc[0] == "100.00%"
+
+    def test_log_multiindex(self):
+        """calc_log 支持 MultiIndex。"""
+        df = pd.DataFrame(
+            {"B": [1.0, np.e]},
+            index=pd.MultiIndex.from_tuples([(1, 'a'), (1, 'b')])
+        )
+        result = calc_log(df, "A = log(B)")
+        assert result["A"].iloc[0] == pytest.approx(0.0, abs=0.01)
+
+    def test_log_invalid_expr(self):
+        """calc_log 表达式格式错误抛异常。"""
+        df = pd.DataFrame({"B": [2.0]})
+        with pytest.raises(ValueError):
+            calc_log(df, "A = log B")
+
+    def test_sqrt_raise_nan(self):
+        """calc_sqrt errors='raise' 时 NaN 抛异常。"""
+        df = pd.DataFrame({"B": [4.0, np.nan]})
+        with pytest.raises(ValueError, match="calc_sqrt"):
+            calc_sqrt(df, "A = sqrt(B)", errors='raise')
+
+    def test_sqrt_raise_negative(self):
+        """calc_sqrt errors='raise' 时负数抛异常。"""
+        df = pd.DataFrame({"B": [4.0, -1.0]})
+        with pytest.raises(ValueError, match="负数"):
+            calc_sqrt(df, "A = sqrt(B)", errors='raise')
+
+    def test_sqrt_format(self):
+        """calc_sqrt 支持格式。"""
+        df = pd.DataFrame({"B": [0.25, 1.0]})
+        result = calc_sqrt(df, "A = sqrt(B) >>> %")
+        assert result["A"].iloc[0] == "50.00%"
+
+    def test_sqrt_multiindex(self):
+        """calc_sqrt 支持 MultiIndex。"""
+        df = pd.DataFrame(
+            {"B": [1.0, 4.0]},
+            index=pd.MultiIndex.from_tuples([(1, 'a'), (1, 'b')])
+        )
+        result = calc_sqrt(df, "A = sqrt(B)")
+        assert result["A"].tolist() == [1.0, 2.0]
+
+    def test_sqrt_invalid_expr(self):
+        """calc_sqrt 表达式格式错误抛异常。"""
+        df = pd.DataFrame({"B": [2.0]})
+        with pytest.raises(ValueError):
+            calc_sqrt(df, "A = sqrt B")
+
+    def test_root_raise_nan(self):
+        """calc_root errors='raise' 时 NaN 抛异常。"""
+        df = pd.DataFrame({"B": [8.0, np.nan]})
+        with pytest.raises(ValueError, match="calc_root"):
+            calc_root(df, "A = root(B, 3)", errors='raise')
+
+    def test_root_format(self):
+        """calc_root 支持格式。"""
+        df = pd.DataFrame({"B": [8.0, 27.0]})
+        result = calc_root(df, "A = root(B, 3) >>> %")
+        assert result["A"].iloc[0] == "200.00%"
+
+    def test_root_multiindex(self):
+        """calc_root 支持 MultiIndex。"""
+        df = pd.DataFrame(
+            {"B": [1.0, 8.0]},
+            index=pd.MultiIndex.from_tuples([(1, 'a'), (1, 'b')])
+        )
+        result = calc_root(df, "A = root(B, 3)")
+        assert result["A"].iloc[0] == pytest.approx(1.0, abs=0.01)
+
+    def test_root_invalid_expr(self):
+        """calc_root 表达式格式错误抛异常。"""
+        df = pd.DataFrame({"B": [2.0]})
+        with pytest.raises(ValueError):
+            calc_root(df, "A = root B")
+
+
+class TestParseCoverage:
+    """补充 parse.py 的分支覆盖测试。"""
+
+    def test_eval_unknown_function(self):
+        """_eval_ast_node 遇到未知函数抛异常。"""
+        df = pd.DataFrame({"B": [2.0]})
+        with pytest.raises(ValueError, match="不支持的函数"):
+            calc(df, "A = unknown(B)")
+
+    def test_eval_non_numeric_constant(self):
+        """_eval_ast_node 遇到非数字常量抛异常。"""
+        df = pd.DataFrame({"B": [2.0]})
+        with pytest.raises(ValueError, match="不支持的字面量"):
+            calc(df, "A = B + 'hello'")
+
+    def test_eval_unsupported_binop(self):
+        """_eval_ast_node 遇到不支持的二元运算符抛异常。"""
+        df = pd.DataFrame({"B": [2.0], "C": [3.0]})
+        with pytest.raises(ValueError, match="不支持的运算符"):
+            calc(df, "A = B % C")
+
+    def test_eval_unsupported_unaryop(self):
+        """_eval_ast_node 遇到不支持的一元运算符抛异常。"""
+        df = pd.DataFrame({"B": [2.0]})
+        with pytest.raises(ValueError, match="不支持的一元运算符"):
+            calc(df, "A = ~B")
+
+    def test_decompose_unknown_function(self):
+        """_decompose_ast 遇到未知函数抛异常。"""
+        df = pd.DataFrame({"B": [2.0]})
+        with pytest.raises(ValueError, match="不支持的函数"):
+            _calc_decompose(df, "A = unknown(B)")
+
+    def test_decompose_scalar_pow(self):
+        """_decompose_ast 标量 ** 标量。"""
+        df = pd.DataFrame({"X": [1.0]})
+        result = _calc_decompose(df, "A = 2 ** 3")
+        assert result.df["A"].iloc[0] == 8.0
+
+    def test_decompose_scalar_div_zero_by_zero(self):
+        """_decompose_ast 标量 0/0 → NaN。"""
+        df = pd.DataFrame({"X": [1.0]})
+        result = _calc_decompose(df, "A = 0 / 0")
+        assert pd.isna(result.df["A"].iloc[0])
+
+    def test_decompose_scalar_div_nonzero_by_zero(self):
+        """_decompose_ast 标量 5/0 → 0。"""
+        df = pd.DataFrame({"X": [1.0]})
+        result = _calc_decompose(df, "A = 5 / 0")
+        assert result.df["A"].iloc[0] == 0.0
+
+    def test_decompose_unary_minus_na_raise(self):
+        """_decompose_ast 一元负号 + NaN + errors='raise' 抛异常。"""
+        df = pd.DataFrame({"B": [2.0, np.nan]})
+        with pytest.raises(ValueError, match="NaN"):
+            _calc_decompose(df, "A = -B", errors='raise')
+
+    def test_decompose_call_not_name(self):
+        """_decompose_ast 函数调用不是 ast.Name 抛异常。"""
+        df = pd.DataFrame({"B": [2.0]})
+        with pytest.raises(ValueError, match="简单函数调用"):
+            _calc_decompose(df, "A = obj.method(B)")
+
+    def test_decompose_log_sqrt_root_via_calc(self):
+        """calc() 调用 log/sqrt/root 走 _decompose_ast 的 Call 分支。"""
+        df = pd.DataFrame({"B": [1.0, np.e]})
+        result = calc(df, "A = log(B)")
+        assert result["A"].iloc[1] == pytest.approx(1.0, abs=0.01)
+
+        df = pd.DataFrame({"B": [1.0, 4.0]})
+        result = calc(df, "A = sqrt(B)")
+        assert result["A"].iloc[1] == 2.0
+
+        df = pd.DataFrame({"B": [1.0, 8.0]})
+        result = calc(df, "A = root(B, 3)")
+        assert result["A"].iloc[1] == pytest.approx(2.0, abs=0.01)
+
+    def test_decompose_scalar_sub(self):
+        """_decompose_ast 标量减法。"""
+        df = pd.DataFrame({"X": [1.0]})
+        result = _calc_decompose(df, "A = 5 - 3")
+        assert result.df["A"].iloc[0] == 2.0
+
+    def test_decompose_scalar_mul(self):
+        """_decompose_ast 标量乘法。"""
+        df = pd.DataFrame({"X": [1.0]})
+        result = _calc_decompose(df, "A = 5 * 3")
+        assert result.df["A"].iloc[0] == 15.0
+
+    def test_decompose_scalar_div_nonzero(self):
+        """_decompose_ast 标量除法（分母非零）。"""
+        df = pd.DataFrame({"X": [1.0]})
+        result = _calc_decompose(df, "A = 6 / 3")
+        assert result.df["A"].iloc[0] == 2.0
+
+    def test_decompose_scalar_pow_zero_zero(self):
+        """_decompose_ast 标量 0**0 → NaN。"""
+        df = pd.DataFrame({"X": [1.0]})
+        result = _calc_decompose(df, "A = 0 ** 0")
+        assert pd.isna(result.df["A"].iloc[0])
+
+    def test_decompose_left_scalar_to_tmp(self):
+        """_decompose_ast 左标量 + 右 Series → 左标量转为临时列。"""
+        df = pd.DataFrame({"B": [10.0, 20.0]})
+        result = _calc_decompose(df, "A = 5 + B")
+        assert result.df["A"].tolist() == [15.0, 25.0]
+
+
+class TestUtilsCoverage:
+    """补充 utils.py / calc.py / chain.py 的分支覆盖测试。"""
+
+    def test_calc_multiindex_scalar_result(self):
+        """calc 返回标量结果且 df 为 MultiIndex 时走 line 106 分支。"""
+        df = pd.DataFrame(
+            {"X": [1.0, 2.0]},
+            index=pd.MultiIndex.from_tuples([(1, 'a'), (1, 'b')])
+        )
+        result = calc(df, "A = 42")
+        assert result["A"].tolist() == [42.0, 42.0]
+
+    def test_format_percent_multiindex(self):
+        """_apply_format 百分比 + MultiIndex 走 utils.py 55-57 分支。"""
+        df = pd.DataFrame(
+            {"B": [0.5, 0.25], "C": [0.0, 0.0]},
+            index=pd.MultiIndex.from_tuples([(1, 'a'), (1, 'b')])
+        )
+        result = calc_add(df, "A = B + C >>> %")
+        assert result["A"].iloc[0] == "50.00%"
+        assert result["A"].iloc[1] == "25.00%"
+
+    def test_calc_div_invalid_expr(self):
+        """calc_div 表达式格式错误（无 '=' 或 多个 '/'）。"""
+        df = pd.DataFrame({"B": [10.0], "C": [2.0]})
+        with pytest.raises(ValueError, match="格式错误"):
+            calc_div(df, "A B / C")
+        with pytest.raises(ValueError, match="多个 '/'"):
+            calc_div(df, "A = B / C / D")
+
+    def test_calc_mul_invalid_expr(self):
+        """calc_mul 表达式格式错误（无 '=' 或 多个 '*'）。"""
+        df = pd.DataFrame({"B": [10.0], "C": [2.0]})
+        with pytest.raises(ValueError, match="格式错误"):
+            calc_mul(df, "A B * C")
+        with pytest.raises(ValueError, match=r"多个 '\*'"):
+            calc_mul(df, "A = B * C * D")
+
+    def test_calc_pow_missing_operator(self):
+        """calc_pow 表达式无 ** 或 ^ 抛异常。"""
+        df = pd.DataFrame({"B": [2.0], "C": [3.0]})
+        with pytest.raises(ValueError, match="未找到指数运算符"):
+            calc_pow(df, "A = B + C")
+
+    def test_calc_pow_wrong_operand_count(self):
+        """calc_pow 表达式操作数数量错误抛异常。"""
+        df = pd.DataFrame({"B": [2.0]})
+        with pytest.raises(ValueError, match="格式错误"):
+            calc_pow(df, "A = B ** 2 ** 3")
+
+    def test_calc_log_invalid_expr_no_equals(self):
+        """calc_log 无 '=' 抛异常。"""
+        df = pd.DataFrame({"B": [2.0]})
+        with pytest.raises(ValueError, match="格式错误"):
+            calc_log(df, "A log(B)")
+
+    def test_calc_sqrt_invalid_expr_no_equals(self):
+        """calc_sqrt 无 '=' 抛异常。"""
+        df = pd.DataFrame({"B": [2.0]})
+        with pytest.raises(ValueError, match="格式错误"):
+            calc_sqrt(df, "A sqrt(B)")
+
+    def test_calc_root_invalid_expr_no_equals(self):
+        """calc_root 无 '=' 抛异常。"""
+        df = pd.DataFrame({"B": [2.0]})
+        with pytest.raises(ValueError, match="格式错误"):
+            calc_root(df, "A root(B, 3)")
+
+    def test_calc_pow_unparsable_operand(self):
+        """calc_pow 操作数无法解析为 float 抛异常。"""
+        df = pd.DataFrame({"B": [2.0]})
+        with pytest.raises(ValueError, match="无法解析"):
+            calc_pow(df, "A = B ** hello")
+
+    def test_calc_pow_scalar_zero_series(self):
+        """calc_pow 左标量=0，右 Series（0 ** B → NaN where B=0）。"""
+        df = pd.DataFrame({"B": [0.0, 2.0, 3.0]})
+        result = calc_pow(df, "A = 0 ** B")
+        assert pd.isna(result["A"].iloc[0])
+        assert result["A"].iloc[1] == 0.0
+        assert result["A"].iloc[2] == 0.0
+
+    def test_calc_pow_series_scalar_zero(self):
+        """calc_pow 左 Series 含 0，右标量=0（B ** 0 → NaN where B=0）。"""
+        df = pd.DataFrame({"B": [0.0, 2.0, 3.0]})
+        result = calc_pow(df, "A = B ** 0")
+        assert pd.isna(result["A"].iloc[0])
+        assert result["A"].iloc[1] == 1.0
+        assert result["A"].iloc[2] == 1.0
+
+    def test_calc_pow_scalar_zero_zero(self):
+        """calc_pow 双方都是标量 0**0 → NaN。"""
+        df = pd.DataFrame({"X": [1.0]})
+        result = calc_pow(df, "A = 0 ** 0")
+        assert pd.isna(result["A"].iloc[0])
+
+    def test_calc_abs_invalid_no_equals(self):
+        """calc_abs 无 '=' 抛异常。"""
+        df = pd.DataFrame({"B": [2.0]})
+        with pytest.raises(ValueError, match="格式错误"):
+            calc_abs(df, "A abs(B)")
+
+    def test_chain_lineage_direct_assignment(self):
+        """Calchemy 直接赋值 A = B 时 lineage 走无中间步骤分支（A 不被回溯到 B）。"""
+        df = pd.DataFrame({"B": [10, 20], "C": [3, 7]})
+        chain = Calchemy(df).calc("A = B").calc("D = A + C")
+        lineage = chain.lineage("D")
+        assert "A" in lineage
+        assert "C" in lineage
